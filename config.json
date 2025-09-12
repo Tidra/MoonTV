@@ -1,5 +1,7 @@
 {
   "cache_time": 7200,
+  "download_path": "/downloads",
+  "custom_category": [],
   "api_site": {
     "dyttzy": {
       "api": "http://caiji.dyttzyapi.com/api.php/provide/vod",

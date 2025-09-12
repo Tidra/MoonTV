@@ -25,6 +25,45 @@ export interface Favorite {
   search_title: string; // 搜索时使用的标题
 }
 
+// 服务器端下载任务接口
+export interface ServerDownloadTask {
+  id: string;
+  title: string;
+  poster: string;
+  source: string;
+  sourceId: string;
+  startEpisode: number;
+  totalEpisodes: number;
+  downloadPath: string; // 相对于基础下载路径的路径
+  cronExpression: string;
+  lastRun?: number;
+  nextRun?: number;
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+// 服务器端缓存视频接口
+export interface ServerCachedVideo {
+  id: string; // 定时任务的ID
+  unique_id: string; // 缓存视频的唯一ID
+  title: string;
+  poster: string;
+  episode_path: string; // 存储位置, 相对于基础下载路径的路径
+  episode_number: number; // 实际的集数
+  source: string;
+  source_name: string;
+  class?: string;
+  year: string;
+  desc?: string;
+  type_name?: string;
+  douban_id?: number;
+  org_source: string; // 来自的在线源
+  org_source_id: string; // 来自的在线源的视频id
+  duration?: number;
+  download_time: number;
+}
+
 // 存储接口
 export interface IStorage {
   // 播放记录相关
@@ -87,6 +126,7 @@ export interface SearchResult {
   title: string;
   poster: string;
   episodes: string[];
+  episode_numbers: number[]; // 实际的集数数组，与episodes数组一一对应
   source: string;
   source_name: string;
   class?: string;
@@ -116,4 +156,13 @@ export interface SkipConfig {
   enable: boolean; // 是否启用跳过片头片尾
   intro_time: number; // 片头时间（秒）
   outro_time: number; // 片尾时间（秒）
+}
+
+// 下载状态接口
+export interface ServerDownloadStatus {
+  taskId: string;
+  episode: number;
+  status: 'pending' | 'downloading' | 'completed' | 'failed';
+  progress: number;
+  error?: string;
 }

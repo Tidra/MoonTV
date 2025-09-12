@@ -1,2 +1,67 @@
+# Docker构建忽略文件
+# 优化Docker构建缓存和安全性
+
+# 环境变量和配置文件（排除敏感信息）
 .env
 .env*.local
+
+# Git和版本控制
+.git
+.gitignore
+.gitattributes
+
+# 依赖和缓存
+node_modules
+.npm
+.yarn
+.pnpm-store
+.next
+.vercel
+
+# 日志文件
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# IDE和编辑器文件
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 操作系统生成的文件
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# 临时文件和目录
+tmp/
+temp/
+.tmp/
+.cache/
+
+# 测试和覆盖率报告
+coverage/
+.nyc_output/
+junit.xml
+
+# 构建输出
+dist/
+build/
+out/
+
+# 文档（可选，如果不需要可以取消注释）
+# README.md
+# CHANGELOG.md
+# LICENSE
+
+# 开发工具
+.eslintcache
+.stylelintcache

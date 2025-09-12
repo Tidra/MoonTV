@@ -73,11 +73,34 @@ export async function searchFromApi(
         return parenIndex > 0 ? link.substring(0, parenIndex) : link;
       });
 
+      // 从播放列表中提取实际的集数信息
+      let episode_numbers: number[] = [];
+      if (item.vod_play_url) {
+        const playSources = item.vod_play_url.split('$$$');
+        if (playSources.length > 0) {
+          const mainSource = playSources[0];
+          const episodeList = mainSource.split('#');
+          episode_numbers = episodeList
+            .map((ep: string, index: number) => {
+              // 尝试从集数名称中提取数字
+              const match = ep.match(/^(\d+).*?\$/);
+              return match ? parseInt(match[1], 10) : index + 1;
+            })
+            .filter((num: number) => !isNaN(num));
+        }
+      }
+
+      // 如果无法提取集数信息，则使用默认的顺序编号
+      if (episode_numbers.length === 0 && episodes.length > 0) {
+        episode_numbers = episodes.map((_: string, index: number) => index + 1);
+      }
+
       return {
         id: item.vod_id.toString(),
         title: item.vod_name.trim().replace(/\s+/g, ' '),
         poster: item.vod_pic,
         episodes,
+        episode_numbers,
         source: apiSite.key,
         source_name: apiName,
         class: item.vod_class,
@@ -146,11 +169,32 @@ export async function searchFromApi(
                 return parenIndex > 0 ? link.substring(0, parenIndex) : link;
               });
 
+              // 从播放列表中提取实际的集数信息
+              let episode_numbers: number[] = [];
+              if (item.vod_play_url) {
+                const episodeList = item.vod_play_url.split('#');
+                episode_numbers = episodeList
+                  .map((ep: string, index: number) => {
+                    // 尝试从集数名称中提取数字
+                    const match = ep.match(/^(\d+).*?\$/);
+                    return match ? parseInt(match[1], 10) : index + 1;
+                  })
+                  .filter((num: number) => !isNaN(num));
+              }
+
+              // 如果无法提取集数信息，则使用默认的顺序编号
+              if (episode_numbers.length === 0 && episodes.length > 0) {
+                episode_numbers = episodes.map(
+                  (_: string, index: number) => index + 1
+                );
+              }
+
               return {
                 id: item.vod_id.toString(),
                 title: item.vod_name.trim().replace(/\s+/g, ' '),
                 poster: item.vod_pic,
                 episodes,
+                episode_numbers,
                 source: apiSite.key,
                 source_name: apiName,
                 class: item.vod_class,
@@ -229,6 +273,7 @@ export async function getDetailFromApi(
   let episodes: string[] = [];
 
   // 处理播放源拆分
+  let episode_numbers: number[] = [];
   if (videoDetail.vod_play_url) {
     const playSources = videoDetail.vod_play_url.split('$$$');
     if (playSources.length > 0) {
@@ -243,6 +288,15 @@ export async function getDetailFromApi(
           (url: string) =>
             url && (url.startsWith('http://') || url.startsWith('https://'))
         );
+
+      // 提取实际的集数信息
+      episode_numbers = episodeList
+        .map((ep: string, index: number) => {
+          // 尝试从集数名称中提取数字
+          const match = ep.match(/^(\d+).*?\$/);
+          return match ? parseInt(match[1], 10) : index + 1;
+        })
+        .filter((num: number) => !isNaN(num));
     }
   }
 
@@ -252,11 +306,17 @@ export async function getDetailFromApi(
     episodes = matches.map((link: string) => link.replace(/^\$/, ''));
   }
 
+  // 如果无法提取集数信息，则使用默认的顺序编号
+  if (episode_numbers.length === 0 && episodes.length > 0) {
+    episode_numbers = episodes.map((_: string, index: number) => index + 1);
+  }
+
   return {
     id: id.toString(),
     title: videoDetail.vod_name,
     poster: videoDetail.vod_pic,
     episodes,
+    episode_numbers,
     source: apiSite.key,
     source_name: apiSite.name,
     class: videoDetail.vod_class,
@@ -328,11 +388,15 @@ async function handleSpecialSourceDetail(
   const yearMatch = html.match(/>(\d{4})</);
   const yearText = yearMatch ? yearMatch[1] : 'unknown';
 
+  // 为特殊源生成默认的集数信息
+  const episode_numbers = matches.map((_: string, index: number) => index + 1);
+
   return {
     id,
     title: titleText,
     poster: coverUrl,
     episodes: matches,
+    episode_numbers,
     source: apiSite.key,
     source_name: apiSite.name,
     class: '',

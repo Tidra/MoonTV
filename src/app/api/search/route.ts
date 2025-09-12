@@ -1,12 +1,13 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 import { getCacheTime, getConfig } from '@/lib/config';
 import { searchFromApi } from '@/lib/downstream';
+import { getServerCachedVideosByTitle } from '@/lib/server-download';
 import { yellowWords } from '@/lib/yellow';
 
-export const runtime = 'edge';
+export const runtime = 'nodejs';
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const query = searchParams.get('q');
 
@@ -26,11 +27,18 @@ export async function GET(request: Request) {
 
   const config = await getConfig();
   const apiSites = config.SourceConfig.filter((site) => !site.disabled);
-  const searchPromises = apiSites.map((site) => searchFromApi(site, query));
 
   try {
-    const results = await Promise.all(searchPromises);
+    const allSearchPromises = apiSites.map((site) =>
+      searchFromApi(site, query)
+    );
+
+    // 添加缓存视频的搜索Promise - 直接使用服务器端函数
+    allSearchPromises.push(getServerCachedVideosByTitle(query));
+
+    const results = await Promise.all(allSearchPromises);
     let flattenedResults = results.flat();
+
     if (!config.SiteConfig.DisableYellowFilter) {
       flattenedResults = flattenedResults.filter((result) => {
         const typeName = result.type_name || '';

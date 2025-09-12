@@ -1,5 +1,6 @@
 /* eslint-disable @next/next/no-img-element */
 
+import { HardDrive } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import React, {
   useCallback,
@@ -27,6 +28,12 @@ interface EpisodeSelectorProps {
   episodesPerPage?: number;
   /** 当前选中的集数（1 开始） */
   value?: number;
+  /** 视频源 */
+  source?: string;
+  /** 视频ID */
+  sourceId?: string;
+  /** 实际的集数数组，与episodes数组一一对应 */
+  episodeNumbers?: number[];
   /** 用户点击选集后的回调 */
   onChange?: (episodeNumber: number) => void;
   /** 换源相关 */
@@ -49,6 +56,9 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
   totalEpisodes,
   episodesPerPage = 50,
   value = 1,
+  source,
+  sourceId,
+  episodeNumbers = [],
   onChange,
   onSourceChange,
   currentSource,
@@ -69,6 +79,10 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
   const [attemptedSources, setAttemptedSources] = useState<Set<string>>(
     new Set()
   );
+  // 存储缓存的视频信息
+  const [cachedEpisodes] = useState<Set<number>>(new Set());
+  // 或者如果确实不需要，可以使用下划线前缀
+  // const [cachedEpisodes, _setCachedEpisodes] = useState<Set<number>>(new Set());
 
   // 使用 ref 来避免闭包问题
   const attemptedSourcesRef = useRef<Set<string>>(new Set());
@@ -90,7 +104,10 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
   );
 
   // 当前分页索引（0 开始）
-  const initialPage = Math.floor((value - 1) / episodesPerPage);
+  const initialPage =
+    episodeNumbers && episodeNumbers.length > 0
+      ? Math.floor(episodeNumbers.indexOf(value) / episodesPerPage)
+      : Math.floor((value - 1) / episodesPerPage);
   const [currentPage, setCurrentPage] = useState<number>(initialPage);
 
   // 是否倒序显示
@@ -217,12 +234,33 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
 
   // 升序分页标签
   const categoriesAsc = useMemo(() => {
-    return Array.from({ length: pageCount }, (_, i) => {
-      const start = i * episodesPerPage + 1;
-      const end = Math.min(start + episodesPerPage - 1, totalEpisodes);
-      return { start, end };
-    });
-  }, [pageCount, episodesPerPage, totalEpisodes]);
+    // 如果提供了episodeNumbers数组，使用实际的集数来计算分页
+    if (episodeNumbers && episodeNumbers.length > 0) {
+      const sortedEpisodeNumbers = [...episodeNumbers].sort((a, b) => a - b);
+      const pageCount = Math.ceil(
+        sortedEpisodeNumbers.length / episodesPerPage
+      );
+
+      return Array.from({ length: pageCount }, (_, i) => {
+        const startIndex = i * episodesPerPage;
+        const endIndex = Math.min(
+          startIndex + episodesPerPage - 1,
+          sortedEpisodeNumbers.length - 1
+        );
+        const start = sortedEpisodeNumbers[startIndex];
+        const end = sortedEpisodeNumbers[endIndex];
+        return { start, end };
+      });
+    } else {
+      // 如果没有episodeNumbers数组，使用传统的分页计算
+      const effectivePageCount = Math.ceil(totalEpisodes / episodesPerPage);
+      return Array.from({ length: effectivePageCount }, (_, i) => {
+        const start = i * episodesPerPage + 1;
+        const end = Math.min(start + episodesPerPage - 1, totalEpisodes);
+        return { start, end };
+      });
+    }
+  }, [episodesPerPage, totalEpisodes, episodeNumbers]);
 
   // 根据 descending 状态决定分页标签的排序和内容
   const categories = useMemo(() => {
@@ -393,28 +431,109 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
           {/* 集数网格 */}
           <div className='grid grid-cols-[repeat(auto-fill,minmax(40px,1fr))] auto-rows-[40px] gap-x-3 gap-y-3 overflow-y-auto h-full pb-4'>
             {(() => {
-              const len = currentEnd - currentStart + 1;
-              const episodes = Array.from({ length: len }, (_, i) =>
-                descending ? currentEnd - i : currentStart + i
-              );
-              return episodes;
-            })().map((episodeNumber) => {
-              const isActive = episodeNumber === value;
-              return (
-                <button
-                  key={episodeNumber}
-                  onClick={() => handleEpisodeClick(episodeNumber - 1)}
-                  className={`h-10 flex items-center justify-center text-sm font-medium rounded-md transition-all duration-200 
-                    ${
-                      isActive
-                        ? 'bg-green-500 text-white shadow-lg shadow-green-500/25 dark:bg-green-600'
-                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300 hover:scale-105 dark:bg-white/10 dark:text-gray-300 dark:hover:bg-white/20'
-                    }`.trim()}
-                >
-                  {episodeNumber}
-                </button>
-              );
-            })}
+              // 如果提供了episodeNumbers数组，使用实际的集数显示
+              if (episodeNumbers && episodeNumbers.length > 0) {
+                // 获取当前页的集数
+                const sortedEpisodeNumbers = [...episodeNumbers].sort(
+                  (a, b) => a - b
+                );
+                const startIndex = currentPage * episodesPerPage;
+                const endIndex = Math.min(
+                  startIndex + episodesPerPage - 1,
+                  sortedEpisodeNumbers.length - 1
+                );
+                let currentPageEpisodes = sortedEpisodeNumbers.slice(
+                  startIndex,
+                  endIndex + 1
+                );
+
+                if (descending) {
+                  currentPageEpisodes = currentPageEpisodes.reverse();
+                }
+
+                return currentPageEpisodes.map((episodeNumber) => {
+                  const isActive = episodeNumber === value;
+                  const isCached = cachedEpisodes.has(episodeNumber);
+                  return (
+                    <button
+                      key={episodeNumber}
+                      onClick={() => handleEpisodeClick(episodeNumber)}
+                      className={`h-10 flex items-center justify-center text-sm font-medium rounded-md transition-all duration-200 relative
+                        ${
+                          isActive
+                            ? 'bg-green-500 text-white shadow-lg shadow-green-500/25 dark:bg-green-600'
+                            : isCached
+                            ? 'bg-blue-100 text-blue-800 hover:bg-blue-200 hover:scale-105 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-800/50'
+                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300 hover:scale-105 dark:bg-white/10 dark:text-gray-300 dark:hover:bg-white/20'
+                        }`.trim()}
+                    >
+                      {episodeNumber}
+                      {isCached && (
+                        <div className='absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full border border-white dark:border-gray-900'></div>
+                      )}
+                    </button>
+                  );
+                });
+              } else {
+                // 如果没有episodeNumbers数组，使用传统的显示方式
+                // 如果是缓存源，只显示已缓存的集数
+                if (source === 'server_cache') {
+                  const cachedEpisodeNumbers = Array.from(cachedEpisodes).sort(
+                    (a, b) => (descending ? b - a : a - b)
+                  );
+                  return cachedEpisodeNumbers.map((episodeNumber) => {
+                    const isActive = episodeNumber === value;
+                    return (
+                      <button
+                        key={episodeNumber}
+                        onClick={() => handleEpisodeClick(episodeNumber)}
+                        className={`h-10 flex items-center justify-center text-sm font-medium rounded-md transition-all duration-200 relative
+                          ${
+                            isActive
+                              ? 'bg-green-500 text-white shadow-lg shadow-green-500/25 dark:bg-green-600'
+                              : 'bg-blue-100 text-blue-800 hover:bg-blue-200 hover:scale-105 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-800/50'
+                          }`.trim()}
+                      >
+                        {episodeNumber}
+                        <div className='absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full border border-white dark:border-gray-900'></div>
+                      </button>
+                    );
+                  });
+                } else {
+                  // 在线源显示所有集数，直接使用实际集数
+                  const episodes = [];
+                  for (let i = currentStart; i <= currentEnd; i++) {
+                    episodes.push(i);
+                  }
+                  if (descending) {
+                    episodes.reverse();
+                  }
+                  return episodes.map((episodeNumber) => {
+                    const isActive = episodeNumber === value;
+                    const isCached = cachedEpisodes.has(episodeNumber);
+                    return (
+                      <button
+                        key={episodeNumber}
+                        onClick={() => handleEpisodeClick(episodeNumber)}
+                        className={`h-10 flex items-center justify-center text-sm font-medium rounded-md transition-all duration-200 relative
+                          ${
+                            isActive
+                              ? 'bg-green-500 text-white shadow-lg shadow-green-500/25 dark:bg-green-600'
+                              : isCached
+                              ? 'bg-blue-100 text-blue-800 hover:bg-blue-200 hover:scale-105 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-800/50'
+                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300 hover:scale-105 dark:bg-white/10 dark:text-gray-300 dark:hover:bg-white/20'
+                          }`.trim()}
+                      >
+                        {episodeNumber}
+                        {isCached && (
+                          <div className='absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full border border-white dark:border-gray-900'></div>
+                        )}
+                      </button>
+                    );
+                  });
+                }
+              }
+            })()}
           </div>
         </>
       )}
@@ -457,10 +576,82 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
 
           {!sourceSearchLoading &&
             !sourceSearchError &&
-            availableSources.length > 0 && (
+            (availableSources.length > 0 || cachedEpisodes.size > 0) && (
               <div className='flex-1 overflow-y-auto space-y-2 pb-20'>
+                {/* 缓存源 */}
+                {cachedEpisodes.size > 0 && (
+                  <div
+                    className={`flex items-start gap-3 px-2 py-3 rounded-lg transition-all select-none duration-200 relative bg-blue-500/10 dark:bg-blue-500/20 border-blue-500/30 border cursor-pointer ${
+                      currentSource === 'server_cache'
+                        ? 'border-blue-500/50'
+                        : ''
+                    }`}
+                    onClick={() => {
+                      // 通知父组件切换到缓存源
+                      if (onSourceChange) {
+                        onSourceChange(
+                          'server_cache',
+                          sourceId || currentId || '',
+                          '缓存视频'
+                        );
+                      }
+                    }}
+                  >
+                    {/* 封面 */}
+                    <div className='flex-shrink-0 w-12 h-20 bg-gray-300 dark:bg-gray-600 rounded overflow-hidden flex items-center justify-center'>
+                      <HardDrive className='w-6 h-6 text-blue-500' />
+                    </div>
+
+                    {/* 信息区域 */}
+                    <div className='flex-1 min-w-0 flex flex-col justify-between h-20'>
+                      {/* 标题和分辨率 - 顶部 */}
+                      <div className='flex items-start justify-between gap-3 h-6'>
+                        <div className='flex-1 min-w-0 relative group/title'>
+                          <h3 className='font-medium text-base truncate text-gray-900 dark:text-gray-100 leading-none'>
+                            缓存视频
+                          </h3>
+                        </div>
+                        <div className='bg-gray-500/10 dark:bg-gray-400/20 text-blue-600 dark:text-blue-400 px-1.5 py-0 rounded text-xs flex-shrink-0 min-w-[50px] text-center'>
+                          本地
+                        </div>
+                      </div>
+
+                      {/* 源名称和集数信息 - 垂直居中 */}
+                      <div className='flex items-center justify-between'>
+                        <span className='text-xs px-2 py-1 border border-gray-500/60 rounded text-gray-700 dark:text-gray-300'>
+                          本地缓存
+                        </span>
+                        <span className='text-xs text-gray-500 dark:text-gray-400 font-medium'>
+                          {cachedEpisodes.size} 集
+                        </span>
+                      </div>
+
+                      {/* 网络信息 - 底部 */}
+                      <div className='flex items-end h-6'>
+                        <div className='text-green-600 dark:text-green-400 font-medium text-xs'>
+                          本地播放
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 在线源 */}
                 {availableSources
                   .sort((a, b) => {
+                    // 缓存源优先
+                    if (
+                      a.source === 'server_cache' &&
+                      b.source !== 'server_cache'
+                    )
+                      return -1;
+                    if (
+                      a.source !== 'server_cache' &&
+                      b.source === 'server_cache'
+                    )
+                      return 1;
+
+                    // 当前源优先
                     const aIsCurrent =
                       a.source?.toString() === currentSource?.toString() &&
                       a.id?.toString() === currentId?.toString();

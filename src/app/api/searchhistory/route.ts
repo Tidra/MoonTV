@@ -4,8 +4,9 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth';
 import { db } from '@/lib/db';
+import logger from '@/lib/logger';
 
-export const runtime = 'edge';
+export const runtime = 'nodejs';
 
 // 最大保存条数（与客户端保持一致）
 const HISTORY_LIMIT = 20;
@@ -25,7 +26,7 @@ export async function GET(request: NextRequest) {
     const history = await db.getSearchHistory(authInfo.username);
     return NextResponse.json(history, { status: 200 });
   } catch (err) {
-    console.error('获取搜索历史失败', err);
+    logger.error('获取搜索历史失败', err);
     return NextResponse.json(
       { error: 'Internal Server Error' },
       { status: 500 }
@@ -61,7 +62,7 @@ export async function POST(request: NextRequest) {
     const history = await db.getSearchHistory(authInfo.username);
     return NextResponse.json(history.slice(0, HISTORY_LIMIT), { status: 200 });
   } catch (err) {
-    console.error('添加搜索历史失败', err);
+    logger.error('添加搜索历史失败', err);
     return NextResponse.json(
       { error: 'Internal Server Error' },
       { status: 500 }
@@ -90,7 +91,7 @@ export async function DELETE(request: NextRequest) {
 
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (err) {
-    console.error('删除搜索历史失败', err);
+    logger.error('删除搜索历史失败', err);
     return NextResponse.json(
       { error: 'Internal Server Error' },
       { status: 500 }

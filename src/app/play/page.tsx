@@ -4,7 +4,7 @@
 
 import Artplayer from 'artplayer';
 import Hls from 'hls.js';
-import { Heart } from 'lucide-react';
+import { Heart, Play } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useRef, useState } from 'react';
 
@@ -26,6 +26,7 @@ import { getVideoResolutionFromM3u8, processImageUrl } from '@/lib/utils';
 
 import EpisodeSelector from '@/components/EpisodeSelector';
 import PageLayout from '@/components/PageLayout';
+import ScheduleDownloadModal from '@/components/ScheduleDownloadModal';
 
 // 扩展 HTMLVideoElement 类型以支持 hls 属性
 declare global {
@@ -106,33 +107,43 @@ function PlayPageClient() {
   const [needPrefer, setNeedPrefer] = useState(
     searchParams.get('prefer') === 'true'
   );
+
   const needPreferRef = useRef(needPrefer);
   useEffect(() => {
     needPreferRef.current = needPrefer;
   }, [needPrefer]);
   // 集数相关
-  const [currentEpisodeIndex, setCurrentEpisodeIndex] = useState(0);
+  const [currentEpisodeNumber, setCurrentEpisodeNumber] = useState(() => {
+    const episodeParam = searchParams.get('episode');
+    if (episodeParam) {
+      const episodeNumber = parseInt(episodeParam, 10);
+      if (!isNaN(episodeNumber) && episodeNumber > 0) {
+        return episodeNumber; // 统一使用实际集数
+      }
+    }
+    return 1; // 默认从第1集开始（实际集数）
+  });
 
   const currentSourceRef = useRef(currentSource);
   const currentIdRef = useRef(currentId);
   const videoTitleRef = useRef(videoTitle);
   const videoYearRef = useRef(videoYear);
   const detailRef = useRef<SearchResult | null>(detail);
-  const currentEpisodeIndexRef = useRef(currentEpisodeIndex);
+  const currentEpisodeNumberRef = useRef(currentEpisodeNumber);
 
   // 同步最新值到 refs
   useEffect(() => {
     currentSourceRef.current = currentSource;
     currentIdRef.current = currentId;
     detailRef.current = detail;
-    currentEpisodeIndexRef.current = currentEpisodeIndex;
+    currentEpisodeNumberRef.current = currentEpisodeNumber;
     videoTitleRef.current = videoTitle;
     videoYearRef.current = videoYear;
   }, [
     currentSource,
     currentId,
     detail,
-    currentEpisodeIndex,
+    currentEpisodeNumber,
     videoTitle,
     videoYear,
   ]);
@@ -156,6 +167,10 @@ function PlayPageClient() {
   const [sourceSearchError, setSourceSearchError] = useState<string | null>(
     null
   );
+
+  // 定时下载弹窗状态
+  const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
+  const [initialDownloadTask, setInitialDownloadTask] = useState<any>(null);
 
   // 优选和测速开关
   const [optimizationEnabled] = useState<boolean>(() => {
@@ -203,6 +218,15 @@ function PlayPageClient() {
     sources: SearchResult[]
   ): Promise<SearchResult> => {
     if (sources.length === 1) return sources[0];
+
+    // 首先检查是否有缓存源，如果有则优先使用
+    const cachedSource = sources.find(
+      (source) => source.source === 'server_cache'
+    );
+    if (cachedSource) {
+      console.log('发现缓存源，优先使用缓存源');
+      return cachedSource;
+    }
 
     // 将播放源均分为两批，并发测速各批，避免一次性过多请求
     const batchSize = Math.ceil(sources.length / 2);
@@ -313,7 +337,6 @@ function PlayPageClient() {
     // 按综合评分排序，选择最佳播放源
     resultsWithScore.sort((a, b) => b.score - a.score);
 
-    console.log('播放源评分排序结果:');
     resultsWithScore.forEach((result, index) => {
       console.log(
         `${index + 1}. ${
@@ -400,20 +423,58 @@ function PlayPageClient() {
   // 更新视频地址
   const updateVideoUrl = (
     detailData: SearchResult | null,
-    episodeIndex: number
+    episodeNumber: number
   ) => {
-    if (
-      !detailData ||
-      !detailData.episodes ||
-      episodeIndex >= detailData.episodes.length
-    ) {
+    if (!detailData || !detailData.episodes) {
       setVideoUrl('');
       return;
     }
-    const newUrl = detailData?.episodes[episodeIndex] || '';
-    if (newUrl !== videoUrl) {
-      setVideoUrl(newUrl);
+
+    // 如果有episode_numbers数组，使用实际集数查找对应的播放链接
+    if (detailData.episode_numbers && detailData.episode_numbers.length > 0) {
+      const episodeIndex = detailData.episode_numbers.indexOf(episodeNumber);
+
+      if (episodeIndex >= 0 && episodeIndex < detailData.episodes.length) {
+        const newUrl = detailData.episodes[episodeIndex] || '';
+
+        if (newUrl !== videoUrl) {
+          console.log('URL不同，更新videoUrl...');
+          setVideoUrl(newUrl);
+        } else {
+          console.log('URL相同，不更新');
+        }
+        return;
+      } else {
+        console.warn(
+          `集数 ${episodeNumber} 在 episode_numbers 数组中未找到，无法播放。`
+        );
+      }
+    } else {
+      // 如果没有episode_numbers数组，使用传统的索引方式（向后兼容）
+      // 但需要确保episodeNumber是有效的索引（从1开始）
+      console.log('没有episode_numbers数组，使用传统索引方式...');
+      if (episodeNumber > 0 && episodeNumber <= detailData.episodes.length) {
+        const newUrl = detailData.episodes[episodeNumber - 1] || '';
+        console.log(`传统方式: episodes[${episodeNumber - 1}] =`, newUrl);
+        console.log(`当前videoUrl: ${videoUrl}, 新videoUrl: ${newUrl}`);
+
+        if (newUrl !== videoUrl) {
+          console.log('URL不同，更新videoUrl...');
+          setVideoUrl(newUrl);
+        } else {
+          console.log('URL相同，不更新');
+        }
+        return;
+      } else {
+        console.log(
+          `传统方式索引无效: episodeNumber ${episodeNumber}, episodes.length ${detailData.episodes.length}`
+        );
+      }
     }
+
+    console.log('未找到匹配的播放链接，清空videoUrl');
+    setVideoUrl('');
+    console.log('=== updateVideoUrl 结束 ===');
   };
 
   const ensureVideoSource = (video: HTMLVideoElement | null, url: string) => {
@@ -590,8 +651,8 @@ function PlayPageClient() {
 
   // 当集数索引变化时自动更新视频地址
   useEffect(() => {
-    updateVideoUrl(detail, currentEpisodeIndex);
-  }, [detail, currentEpisodeIndex]);
+    updateVideoUrl(detail, currentEpisodeNumber);
+  }, [detail, currentEpisodeNumber]);
 
   // 进入页面时直接获取全部源信息
   useEffect(() => {
@@ -604,7 +665,9 @@ function PlayPageClient() {
           `/api/detail?source=${source}&id=${id}`
         );
         if (!detailResponse.ok) {
-          throw new Error('获取视频详情失败');
+          throw new Error(
+            `获取视频详情失败: ${detailResponse.status} ${detailResponse.statusText}`
+          );
         }
         const detailData = (await detailResponse.json()) as SearchResult;
         setAvailableSources([detailData]);
@@ -658,56 +721,58 @@ function PlayPageClient() {
         return;
       }
       setLoading(true);
-      setLoadingStage(currentSource && currentId ? 'fetching' : 'searching');
-      setLoadingMessage(
-        currentSource && currentId
-          ? '🎬 正在获取视频详情...'
-          : '🔍 正在搜索播放源...'
-      );
 
-      let sourcesInfo = await fetchSourcesData(searchTitle || videoTitle);
-      if (
-        currentSource &&
-        currentId &&
-        !sourcesInfo.some(
-          (source) => source.source === currentSource && source.id === currentId
-        )
-      ) {
+      let sourcesInfo: SearchResult[] = [];
+      let newEpisodeIndex = -1;
+
+      // 优先：如果指定了源，先获取该源
+      if (currentSource && currentId) {
+        setLoadingStage('fetching');
+        setLoadingMessage('🎬 正在获取视频详情...');
         sourcesInfo = await fetchSourceDetail(currentSource, currentId);
       }
+      let detailData = sourcesInfo[0];
+      if (detailData) {
+        newEpisodeIndex =
+          detailData.episode_numbers.indexOf(currentEpisodeNumber);
+        if (newEpisodeIndex < 0) {
+          // 找不到对应的集数
+          setLoadingMessage('无法找到对应集数');
+        }
+      }
+
+      // 未指定源和 id 或 集数不符合 或 没有指定视频信息
+      if (!currentSource || !currentId || newEpisodeIndex < 0 || !detailData) {
+        setLoadingStage('searching');
+        setLoadingMessage('🔍 正在搜索播放源...');
+        const sourcesAllInfo = await fetchSourcesData(
+          searchTitle || videoTitle
+        );
+        const sourcesInitInfo = sourcesInfo.filter((result: SearchResult) =>
+          result.episode_numbers.indexOf(currentEpisodeNumber) >= 0
+            ? true
+            : false
+        );
+        if (sourcesInitInfo.length > 0) {
+          sourcesInfo = sourcesInitInfo;
+          newEpisodeIndex = 1;
+        } else {
+          sourcesInfo = sourcesInfo ? sourcesInfo : sourcesAllInfo;
+        }
+        if (optimizationEnabled) {
+          setLoadingStage('preferring');
+          setLoadingMessage('⚡ 正在优选最佳播放源...');
+          detailData = await preferBestSource(sourcesInfo);
+        } else {
+          detailData = sourcesInfo[0];
+        }
+      }
+      // 如果还是没有任何结果，报错
       if (sourcesInfo.length === 0) {
         setError('未找到匹配结果');
         setLoading(false);
         return;
       }
-
-      let detailData: SearchResult = sourcesInfo[0];
-      // 指定源和id且无需优选
-      if (currentSource && currentId && !needPreferRef.current) {
-        const target = sourcesInfo.find(
-          (source) => source.source === currentSource && source.id === currentId
-        );
-        if (target) {
-          detailData = target;
-        } else {
-          setError('未找到匹配结果');
-          setLoading(false);
-          return;
-        }
-      }
-
-      // 未指定源和 id 或需要优选，且开启优选开关
-      if (
-        (!currentSource || !currentId || needPreferRef.current) &&
-        optimizationEnabled
-      ) {
-        setLoadingStage('preferring');
-        setLoadingMessage('⚡ 正在优选最佳播放源...');
-
-        detailData = await preferBestSource(sourcesInfo);
-      }
-
-      console.log(detailData.source, detailData.id);
 
       setNeedPrefer(false);
       setCurrentSource(detailData.source);
@@ -716,8 +781,12 @@ function PlayPageClient() {
       setVideoTitle(detailData.title || videoTitleRef.current);
       setVideoCover(detailData.poster);
       setDetail(detailData);
-      if (currentEpisodeIndex >= detailData.episodes.length) {
-        setCurrentEpisodeIndex(0);
+      if (newEpisodeIndex >= 0) {
+        // 找到了对应的集数，使用该集数
+        setCurrentEpisodeNumber(currentEpisodeNumber);
+      } else {
+        // 否则跳转到第一集
+        setCurrentEpisodeNumber(detailData.episode_numbers[0] || 1);
       }
 
       // 规范URL参数
@@ -736,6 +805,10 @@ function PlayPageClient() {
       setTimeout(() => {
         setLoading(false);
       }, 1000);
+
+      if (availableSources.length < 2) {
+        fetchSourcesData(searchTitle || videoTitle);
+      }
     };
 
     initAll();
@@ -753,12 +826,12 @@ function PlayPageClient() {
         const record = allRecords[key];
 
         if (record) {
-          const targetIndex = record.index - 1;
+          const targetNumber = record.index;
           const targetTime = record.play_time;
 
-          // 更新当前选集索引
-          if (targetIndex !== currentEpisodeIndex) {
-            setCurrentEpisodeIndex(targetIndex);
+          // 更新当前选集集数
+          if (targetNumber !== currentEpisodeNumber) {
+            setCurrentEpisodeNumber(targetNumber);
           }
 
           // 保存待恢复的播放进度，待播放器就绪后跳转
@@ -841,15 +914,29 @@ function PlayPageClient() {
       }
 
       // 尝试跳转到当前正在播放的集数
-      let targetIndex = currentEpisodeIndex;
+      let targetNumber = currentEpisodeNumber;
 
-      // 如果当前集数超出新源的范围，则跳转到第一集
-      if (!newDetail.episodes || targetIndex >= newDetail.episodes.length) {
-        targetIndex = 0;
+      // 如果新源有episode_numbers数组，查找当前集数在新源中的对应索引
+      if (newDetail.episode_numbers && newDetail.episode_numbers.length > 0) {
+        // 在新源的episode_numbers数组中查找当前集数
+        const newEpisodeIndex =
+          newDetail.episode_numbers.indexOf(currentEpisodeNumber);
+        if (newEpisodeIndex >= 0) {
+          // 找到了对应的集数，使用该集数
+          targetNumber = currentEpisodeNumber;
+        } else {
+          // 没有找到对应的集数，跳转到第一集
+          targetNumber = newDetail.episode_numbers[0] || 1;
+        }
+      } else {
+        // 如果当前集数超出新源的范围，则跳转到第一集
+        if (!newDetail.episodes || targetNumber >= newDetail.episodes.length) {
+          targetNumber = 1;
+        }
       }
 
       // 如果仍然是同一集数且播放进度有效，则在播放器就绪后恢复到原始进度
-      if (targetIndex !== currentEpisodeIndex) {
+      if (targetNumber !== currentEpisodeNumber) {
         resumeTimeRef.current = 0;
       } else if (
         (!resumeTimeRef.current || resumeTimeRef.current === 0) &&
@@ -871,7 +958,7 @@ function PlayPageClient() {
       setCurrentSource(newSource);
       setCurrentId(newId);
       setDetail(newDetail);
-      setCurrentEpisodeIndex(targetIndex);
+      setCurrentEpisodeNumber(targetNumber);
     } catch (err) {
       // 隐藏换源加载状态
       setIsVideoLoading(false);
@@ -891,34 +978,50 @@ function PlayPageClient() {
   // ---------------------------------------------------------------------------
   // 处理集数切换
   const handleEpisodeChange = (episodeNumber: number) => {
-    if (episodeNumber >= 0 && episodeNumber < totalEpisodes) {
+    // 统一处理：episodeNumber就是实际的集数
+
+    // 检查集数是否存在于episode_numbers数组中
+    const episodeExists =
+      detailRef.current?.episode_numbers?.includes(episodeNumber);
+
+    if (episodeExists) {
       // 在更换集数前保存当前播放进度
       if (artPlayerRef.current && artPlayerRef.current.paused) {
         saveCurrentPlayProgress();
       }
-      setCurrentEpisodeIndex(episodeNumber);
+
+      setCurrentEpisodeNumber(episodeNumber);
+    } else {
+      // 集数不存在于episode_numbers数组中，可能需要处理这种情况
+      console.warn(`集数 ${episodeNumber} 不存在于episode_numbers数组中`);
     }
   };
 
   const handlePreviousEpisode = () => {
     const d = detailRef.current;
-    const idx = currentEpisodeIndexRef.current;
-    if (d && d.episodes && idx > 0) {
+    const currentEpisodeIndex =
+      d?.episode_numbers?.indexOf(currentEpisodeNumberRef.current) ||
+      currentEpisodeNumberRef.current;
+    if (d && d.episodes && currentEpisodeIndex > 1) {
       if (artPlayerRef.current && !artPlayerRef.current.paused) {
         saveCurrentPlayProgress();
       }
-      setCurrentEpisodeIndex(idx - 1);
+      // 确保使用实际的集数而不是索引
+      setCurrentEpisodeNumber(currentEpisodeIndex - 1);
     }
   };
 
   const handleNextEpisode = () => {
     const d = detailRef.current;
-    const idx = currentEpisodeIndexRef.current;
-    if (d && d.episodes && idx < d.episodes.length - 1) {
+    const currentEpisodeIndex =
+      d?.episode_numbers?.indexOf(currentEpisodeNumberRef.current) ||
+      currentEpisodeNumberRef.current;
+    if (d && d.episodes && currentEpisodeIndex < d.episodes.length) {
       if (artPlayerRef.current && !artPlayerRef.current.paused) {
         saveCurrentPlayProgress();
       }
-      setCurrentEpisodeIndex(idx + 1);
+      // 确保使用实际的集数而不是索引
+      setCurrentEpisodeNumber(currentEpisodeIndex + 1);
     }
   };
 
@@ -936,7 +1039,9 @@ function PlayPageClient() {
 
     // Alt + 左箭头 = 上一集
     if (e.altKey && e.key === 'ArrowLeft') {
-      if (detailRef.current && currentEpisodeIndexRef.current > 0) {
+      const d = detailRef.current;
+      const currentEpisode = currentEpisodeNumberRef.current;
+      if (d && currentEpisode != d.episode_numbers[0]) {
         handlePreviousEpisode();
         e.preventDefault();
       }
@@ -945,8 +1050,9 @@ function PlayPageClient() {
     // Alt + 右箭头 = 下一集
     if (e.altKey && e.key === 'ArrowRight') {
       const d = detailRef.current;
-      const idx = currentEpisodeIndexRef.current;
-      if (d && idx < d.episodes.length - 1) {
+      const currentEpisode = currentEpisodeNumberRef.current;
+
+      if (d && currentEpisode != d.episode_numbers[-1]) {
         handleNextEpisode();
         e.preventDefault();
       }
@@ -1042,7 +1148,7 @@ function PlayPageClient() {
         source_name: detailRef.current?.source_name || '',
         year: detailRef.current?.year,
         cover: detailRef.current?.poster || '',
-        index: currentEpisodeIndexRef.current + 1, // 转换为1基索引
+        index: currentEpisodeNumberRef.current, // 直接使用实际集数
         total_episodes: detailRef.current?.episodes.length || 1,
         play_time: Math.floor(currentTime),
         total_time: Math.floor(duration),
@@ -1053,7 +1159,7 @@ function PlayPageClient() {
       lastSaveTimeRef.current = Date.now();
       console.log('播放进度已保存:', {
         title: videoTitleRef.current,
-        episode: currentEpisodeIndexRef.current + 1,
+        episode: currentEpisodeNumberRef.current,
         year: detailRef.current?.year,
         progress: `${Math.floor(currentTime)}/${Math.floor(duration)}`,
       });
@@ -1084,7 +1190,7 @@ function PlayPageClient() {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [currentEpisodeIndex, detail, artPlayerRef.current]);
+  }, [currentEpisodeNumber, detail, artPlayerRef.current]);
 
   // 清理定时器
   useEffect(() => {
@@ -1166,20 +1272,36 @@ function PlayPageClient() {
       !Hls ||
       !videoUrl ||
       loading ||
-      currentEpisodeIndex === null ||
+      currentEpisodeNumber === null ||
       !artRef.current
     ) {
       return;
     }
 
-    // 确保选集索引有效
-    if (
-      !detail ||
-      !detail.episodes ||
-      currentEpisodeIndex >= detail.episodes.length ||
-      currentEpisodeIndex < 0
-    ) {
-      setError(`选集索引无效，当前共 ${totalEpisodes} 集`);
+    // 确保选集有效
+    if (!detail || !detail.episodes) {
+      setError('视频数据无效');
+      return;
+    }
+
+    // 检查当前集数是否有效（存在于episode_numbers数组中，或者在传统模式下是有效的索引）
+    let episodeValid = false;
+    if (detail.episode_numbers && detail.episode_numbers.length > 0) {
+      // 使用episode_numbers数组检查
+      episodeValid = detail.episode_numbers.includes(currentEpisodeNumber);
+    } else {
+      // 传统模式：检查是否在有效范围内（1到episodes.length）
+      episodeValid =
+        currentEpisodeNumber >= 1 &&
+        currentEpisodeNumber <= detail.episodes.length;
+    }
+
+    if (!episodeValid) {
+      if (detail.episode_numbers && detail.episode_numbers.length > 0) {
+        setError(`集数无效，可用集数: ${detail.episode_numbers.join(', ')}`);
+      } else {
+        setError(`集数无效，当前共 ${detail.episodes.length} 集`);
+      }
       return;
     }
 
@@ -1187,7 +1309,6 @@ function PlayPageClient() {
       setError('视频地址无效');
       return;
     }
-    console.log(videoUrl);
 
     // 检测是否为WebKit浏览器
     const isWebkit =
@@ -1197,9 +1318,7 @@ function PlayPageClient() {
     // 非WebKit浏览器且播放器已存在，使用switch方法切换
     if (!isWebkit && artPlayerRef.current) {
       artPlayerRef.current.switch = videoUrl;
-      artPlayerRef.current.title = `${videoTitle} - 第${
-        currentEpisodeIndex + 1
-      }集`;
+      artPlayerRef.current.title = `${videoTitle} - 第${currentEpisodeNumber}集`;
       artPlayerRef.current.poster = videoCover;
       if (artPlayerRef.current?.video) {
         ensureVideoSource(
@@ -1509,8 +1628,8 @@ function PlayPageClient() {
             artPlayerRef.current.duration + skipConfigRef.current.outro_time
         ) {
           if (
-            currentEpisodeIndexRef.current <
-            (detailRef.current?.episodes?.length || 1) - 1
+            currentEpisodeNumberRef.current !=
+            detailRef.current?.episode_numbers[-1]
           ) {
             handleNextEpisode();
           } else {
@@ -1532,12 +1651,51 @@ function PlayPageClient() {
       // 监听视频播放结束事件，自动播放下一集
       artPlayerRef.current.on('video:ended', () => {
         const d = detailRef.current;
-        const idx = currentEpisodeIndexRef.current;
-        if (d && d.episodes && idx < d.episodes.length - 1) {
-          setTimeout(() => {
-            setCurrentEpisodeIndex(idx + 1);
-          }, 1000);
+        const currentEpisode = currentEpisodeNumberRef.current;
+
+        if (d && d.episodes) {
+          // 如果有episode_numbers数组，查找下一集的实际集数
+          if (d.episode_numbers && d.episode_numbers.length > 0) {
+            const currentIndex = d.episode_numbers.indexOf(currentEpisode);
+
+            if (
+              currentIndex >= 0 &&
+              currentIndex < d.episode_numbers.length - 1
+            ) {
+              const nextEpisode = d.episode_numbers[currentIndex + 1];
+              console.log(`找到下一集: ${nextEpisode}，将在1秒后播放...`);
+              setTimeout(() => {
+                console.log('执行播放下一集...');
+                setCurrentEpisodeNumber(nextEpisode);
+              }, 1000);
+              return;
+            } else {
+              console.log(
+                `已经是最后一集或当前集数未在数组中，currentIndex: ${currentIndex}, 数组长度: ${d.episode_numbers.length}`
+              );
+            }
+          } else {
+            console.log('没有episode_numbers数组，使用传统索引方式...');
+            // 传统方式：直接使用索引+1
+            if (currentEpisode < d.episodes.length) {
+              const nextEpisode = currentEpisode + 1;
+              console.log(
+                `传统方式：将播放第${nextEpisode}集，将在1秒后执行...`
+              );
+              setTimeout(() => {
+                console.log('执行播放下一集...');
+                setCurrentEpisodeNumber(nextEpisode);
+              }, 1000);
+            } else {
+              console.log(
+                `已经是最后一集，currentEpisode: ${currentEpisode}, episodes.length: ${d.episodes.length}`
+              );
+            }
+          }
+        } else {
+          console.log('没有源数据，无法播放下一集');
         }
+        console.log('=== 自动播放下一集处理结束 ===');
       });
 
       artPlayerRef.current.on('video:timeupdate', () => {
@@ -1749,7 +1907,7 @@ function PlayPageClient() {
             {videoTitle || '影片标题'}
             {totalEpisodes > 1 && (
               <span className='text-gray-500 dark:text-gray-400'>
-                {` > 第 ${currentEpisodeIndex + 1} 集`}
+                {` > 第 ${currentEpisodeNumber} 集`}
               </span>
             )}
           </h1>
@@ -1866,7 +2024,10 @@ function PlayPageClient() {
             >
               <EpisodeSelector
                 totalEpisodes={totalEpisodes}
-                value={currentEpisodeIndex + 1}
+                value={currentEpisodeNumber}
+                source={currentSource}
+                sourceId={currentId}
+                episodeNumbers={detail?.episode_numbers}
                 onChange={handleEpisodeChange}
                 onSourceChange={handleSourceChange}
                 currentSource={currentSource}
@@ -1897,6 +2058,45 @@ function PlayPageClient() {
                   className='ml-3 flex-shrink-0 hover:opacity-80 transition-opacity'
                 >
                   <FavoriteIcon filled={favorited} />
+                </button>
+                <button
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    // 打开定时下载任务弹窗，传递当前视频信息
+                    const title = detail?.title || videoTitle || '';
+
+                    // 检查是否已存在下载任务
+                    if (title) {
+                      try {
+                        const response = await fetch(
+                          `/api/download/tasks?title=${encodeURIComponent(
+                            title
+                          )}`
+                        );
+                        const result = await response.json();
+                        if (
+                          result.success &&
+                          result.data &&
+                          result.data.length > 0
+                        ) {
+                          const existingTask = result.data[0];
+                          setInitialDownloadTask(existingTask);
+                        } else {
+                          setInitialDownloadTask(null);
+                        }
+                      } catch (error) {
+                        console.error('获取下载任务失败:', error);
+                        setInitialDownloadTask(null);
+                      }
+                    }
+
+                    // 设置弹窗参数并打开弹窗
+                    setIsScheduleModalOpen(true);
+                  }}
+                  className='ml-3 flex-shrink-0 hover:opacity-80 transition-opacity bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded-md text-sm flex items-center'
+                >
+                  <Play className='w-4 h-4 mr-1' />
+                  定时下载
                 </button>
               </h1>
 
@@ -1949,6 +2149,21 @@ function PlayPageClient() {
           </div>
         </div>
       </div>
+
+      {/* 定时下载任务弹窗 */}
+      <ScheduleDownloadModal
+        isOpen={isScheduleModalOpen}
+        onClose={() => {
+          setIsScheduleModalOpen(false);
+          setInitialDownloadTask(null);
+        }}
+        source={detail?.source || currentSource || ''}
+        sourceId={detail?.id || currentId || ''}
+        title={detail?.title || videoTitle || ''}
+        episodesCount={detail?.episodes?.length || 1}
+        isMovie={!detail?.episodes || detail.episodes.length <= 1}
+        initialTask={initialDownloadTask}
+      />
     </PageLayout>
   );
 }

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getConfig } from '@/lib/config';
 import { db } from '@/lib/db';
+import logger from '@/lib/logger';
 
 export const runtime = 'edge';
 
@@ -120,11 +121,11 @@ export async function POST(req: NextRequest) {
 
       return response;
     } catch (err) {
-      console.error('数据库注册失败', err);
+      logger.error('数据库注册失败', err);
       return NextResponse.json({ error: '数据库错误' }, { status: 500 });
     }
   } catch (error) {
-    console.error('注册接口异常', error);
+    logger.error('注册接口异常', error);
     return NextResponse.json({ error: '服务器错误' }, { status: 500 });
   }
 }

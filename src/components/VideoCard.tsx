@@ -203,15 +203,21 @@ export default function VideoCard({
         }${actualSearchType ? `&stype=${actualSearchType}` : ''}`
       );
     } else if (actualSource && actualId) {
-      router.push(
-        `/play?source=${actualSource}&id=${actualId}&title=${encodeURIComponent(
-          actualTitle
-        )}${actualYear ? `&year=${actualYear}` : ''}${
-          isAggregate ? '&prefer=true' : ''
-        }${
-          actualQuery ? `&stitle=${encodeURIComponent(actualQuery.trim())}` : ''
-        }${actualSearchType ? `&stype=${actualSearchType}` : ''}`
-      );
+      // 构建基础URL参数
+      let url = `/play?source=${actualSource}&id=${actualId}&title=${encodeURIComponent(
+        actualTitle
+      )}${actualYear ? `&year=${actualYear}` : ''}${
+        isAggregate ? '&prefer=true' : ''
+      }${
+        actualQuery ? `&stitle=${encodeURIComponent(actualQuery.trim())}` : ''
+      }${actualSearchType ? `&stype=${actualSearchType}` : ''}`;
+
+      // 如果是播放记录且有当前集数，则添加集数参数
+      if (from === 'playrecord' && currentEpisode) {
+        url += `&episode=${currentEpisode}`;
+      }
+
+      router.push(url);
     }
   }, [
     from,
@@ -223,6 +229,7 @@ export default function VideoCard({
     isAggregate,
     actualQuery,
     actualSearchType,
+    currentEpisode,
   ]);
 
   const config = useMemo(() => {
@@ -283,7 +290,7 @@ export default function VideoCard({
           fill
           className='object-cover'
           referrerPolicy='no-referrer'
-          onLoadingComplete={() => setIsLoading(true)}
+          onLoad={() => setIsLoading(true)}
         />
 
         {/* 悬浮遮罩 */}

@@ -3,11 +3,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getConfig } from '@/lib/config';
+import logger from '@/lib/logger';
 
-export const runtime = 'edge';
+export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
-  console.log('server-config called: ', request.url);
+  logger.info('server-config called: ', request.url);
 
   const config = await getConfig();
   const result = {

@@ -14,6 +14,7 @@ export interface ApiSite {
 
 interface ConfigFileStruct {
   cache_time?: number;
+  download_path?: string;
   api_site: {
     [key: string]: ApiSite;
   };
