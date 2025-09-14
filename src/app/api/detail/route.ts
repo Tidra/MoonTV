@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getAvailableApiSites, getCacheTime } from '@/lib/config';
 import { getDetailFromApi } from '@/lib/downstream';
-import { getServerCachedVideosById } from '@/lib/server-download';
+import { getServerCachedVideosById } from '@/lib/serverDownload';
 
 export const runtime = 'nodejs';
 

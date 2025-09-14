@@ -2,16 +2,14 @@ import fs from 'fs';
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 
-import {
-  getAllServerDownloadTasks,
-  saveServerDownloadTask,
-} from '@/lib/download-executor';
 import logger from '@/lib/logger';
 import {
   executeDownloadTask,
+  getAllServerDownloadTasks,
   getServerDownloadTaskById,
+  saveServerDownloadTask,
   stopDownloadTask,
-} from '@/lib/server-download';
+} from '@/lib/serverDownload';
 
 // GET /api/download/control - 获取任务状态
 export async function GET(request: NextRequest) {

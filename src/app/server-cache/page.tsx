@@ -54,13 +54,17 @@ export default function ServerCachePage() {
   // 获取所有数据
   const fetchData = async () => {
     try {
-      const [tasksResponse, videosResponse] = await Promise.all([
-        fetch('/api/download/tasks'),
-        fetch('/api/download/videos'),
-      ]);
+      const [tasksResponse, videosResponse, statusResponse] = await Promise.all(
+        [
+          fetch('/api/download/tasks'),
+          fetch('/api/download/videos'),
+          fetch('/api/download/control?action=status'),
+        ]
+      );
 
       const tasksData = await tasksResponse.json();
       const videosData = await videosResponse.json();
+      const statusData = await statusResponse.json();
 
       if (tasksData.success) {
         setServerTasks(tasksData.data);
@@ -68,6 +72,10 @@ export default function ServerCachePage() {
 
       if (videosData.success) {
         setServerVideos(videosData.data);
+      }
+
+      if (statusData.success) {
+        setDownloadingTaskIds(statusData.downloadingTasks || []);
       }
     } catch (error) {
       console.error('获取数据失败:', error);
@@ -96,30 +104,11 @@ export default function ServerCachePage() {
     };
   }, []);
 
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  // // 轮询下载状态
-  // useEffect(() => {
-  //   const intervalId = setInterval(async () => {
-  //     try {
-  //       const response = await fetch('/api/download/control?action=status');
-  //       const result = await response.json();
-
-  //       if (result.success) {
-  //         setDownloadingTaskIds(result.downloadingTasks || []);
-  //       }
-  //     } catch (error) {
-  //       console.error('获取下载状态失败:', error);
-  //     }
-  //   }, 3000); // 每3秒检查一次下载状态
-
-  //   return () => clearInterval(intervalId);
-  // }, []);
-
   // 根据当前标签页轮询数据
   useEffect(() => {
+    //先获取一次数据
+    fetchData();
+
     const intervalId = setInterval(async () => {
       try {
         if (activeTab === 'tasks') {
@@ -542,13 +531,6 @@ export default function ServerCachePage() {
                             className='object-cover'
                             referrerPolicy='no-referrer'
                             onLoad={() => setIsLoading(true)}
-                            // src={video.poster}
-                            // alt={video.title}
-                            // className="w-full h-full object-cover"
-                            // onLoad={(e) => {
-                            //   // 图片加载成功，确保显示
-                            //   e.currentTarget.style.opacity = '1';
-                            // }}
                             onError={(e) => {
                               // 如果图片加载失败，显示默认背景
                               e.currentTarget.style.display = 'none';

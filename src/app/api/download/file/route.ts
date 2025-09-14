@@ -3,8 +3,8 @@ import fs from 'fs';
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 
-import { getBaseDownloadPath } from '@/lib/download-executor';
 import logger from '@/lib/logger';
+import { getBaseDownloadPath } from '@/lib/serverDownload';
 
 // GET /api/download/file - 视频文件访问
 export async function GET(request: NextRequest) {

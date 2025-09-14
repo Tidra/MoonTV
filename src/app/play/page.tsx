@@ -997,7 +997,7 @@ function PlayPageClient() {
     }
   };
 
-  const handlePreviousEpisode = () => {
+  const handlePreviousEpisode = (timeout = 0) => {
     const d = detailRef.current;
     const currentEpisodeIndex =
       d?.episode_numbers?.indexOf(currentEpisodeNumberRef.current) ||
@@ -1009,19 +1009,105 @@ function PlayPageClient() {
       // 确保使用实际的集数而不是索引
       setCurrentEpisodeNumber(currentEpisodeIndex - 1);
     }
+    const currentEpisode = currentEpisodeNumberRef.current;
+
+    if (d && d.episodes) {
+      // 如果有episode_numbers数组，查找上一集的实际集数
+      if (d.episode_numbers && d.episode_numbers.length > 0) {
+        const currentIndex = d.episode_numbers.indexOf(currentEpisode);
+
+        if (currentIndex > 0) {
+          saveCurrentPlayProgress();
+          const preEpisode = d.episode_numbers[currentIndex - 1];
+          console.log(`找到上一集: ${preEpisode}，将在${timeout}毫秒后播放...`);
+          setTimeout(() => {
+            console.log('执行播放上一集...');
+            setCurrentEpisodeNumber(preEpisode);
+          }, timeout);
+          return true;
+        } else {
+          console.log(
+            `已经是第一集或当前集数未在数组中，currentIndex: ${currentIndex}, 数组长度: ${d.episode_numbers.length}`
+          );
+          return false;
+        }
+      } else {
+        console.log('没有episode_numbers数组，使用传统索引方式...');
+        // 传统方式：直接使用索引+1
+        if (currentEpisode > 0) {
+          saveCurrentPlayProgress();
+          const preEpisode = currentEpisode - 1;
+          console.log(
+            `传统方式：将播放第${preEpisode}集，将在${timeout}毫秒后执行...`
+          );
+          setTimeout(() => {
+            console.log('执行播放下一集...');
+            setCurrentEpisodeNumber(preEpisode);
+          }, timeout);
+          return true;
+        } else {
+          console.log(
+            `已经是第一集，currentEpisode: ${currentEpisode}, episodes.length: ${d.episodes.length}`
+          );
+          return false;
+        }
+      }
+    } else {
+      console.log('没有源数据，无法播放下一集');
+      return false;
+    }
   };
 
-  const handleNextEpisode = () => {
+  const handleNextEpisode = (timeout = 0) => {
     const d = detailRef.current;
-    const currentEpisodeIndex =
-      d?.episode_numbers?.indexOf(currentEpisodeNumberRef.current) ||
-      currentEpisodeNumberRef.current;
-    if (d && d.episodes && currentEpisodeIndex < d.episodes.length) {
-      if (artPlayerRef.current && !artPlayerRef.current.paused) {
-        saveCurrentPlayProgress();
+    const currentEpisode = currentEpisodeNumberRef.current;
+
+    if (d && d.episodes) {
+      // 如果有episode_numbers数组，查找下一集的实际集数
+      if (d.episode_numbers && d.episode_numbers.length > 0) {
+        const currentIndex = d.episode_numbers.indexOf(currentEpisode);
+
+        if (currentIndex >= 0 && currentIndex < d.episode_numbers.length - 1) {
+          saveCurrentPlayProgress();
+          const nextEpisode = d.episode_numbers[currentIndex + 1];
+          console.log(
+            `找到下一集: ${nextEpisode}，将在${timeout}毫秒后播放...`
+          );
+          setTimeout(() => {
+            console.log('执行播放下一集...');
+            setCurrentEpisodeNumber(nextEpisode);
+          }, timeout);
+          return true;
+        } else {
+          console.log(
+            `已经是最后一集或当前集数未在数组中，currentIndex: ${currentIndex}, 数组长度: ${d.episode_numbers.length}`
+          );
+          return false;
+        }
+      } else {
+        console.log('没有episode_numbers数组，使用传统索引方式...');
+        // 传统方式：直接使用索引+1
+        if (currentEpisode < d.episodes.length) {
+          saveCurrentPlayProgress();
+          const nextEpisode = currentEpisode + 1;
+          console.log(
+            `传统方式：将播放第${nextEpisode}集，将在${timeout}毫秒后执行...`
+          );
+          setTimeout(() => {
+            console.log('执行播放下一集...');
+            setCurrentEpisodeNumber(nextEpisode);
+          }, timeout);
+          return true;
+        } else {
+          console.log(
+            `已经是最后一集，currentEpisode: ${currentEpisode}, episodes.length: ${d.episodes.length}`
+          );
+          return false;
+        }
       }
-      // 确保使用实际的集数而不是索引
-      setCurrentEpisodeNumber(currentEpisodeIndex + 1);
+    } else {
+      console.log('没有源数据，无法播放下一集');
+      return false;
     }
   };
 
@@ -1039,21 +1125,16 @@ function PlayPageClient() {
 
     // Alt + 左箭头 = 上一集
     if (e.altKey && e.key === 'ArrowLeft') {
-      const d = detailRef.current;
-      const currentEpisode = currentEpisodeNumberRef.current;
-      if (d && currentEpisode != d.episode_numbers[0]) {
-        handlePreviousEpisode();
+      const pre = handlePreviousEpisode();
+      if (pre) {
         e.preventDefault();
       }
     }
 
     // Alt + 右箭头 = 下一集
     if (e.altKey && e.key === 'ArrowRight') {
-      const d = detailRef.current;
-      const currentEpisode = currentEpisodeNumberRef.current;
-
-      if (d && currentEpisode != d.episode_numbers[-1]) {
-        handleNextEpisode();
+      const next = handleNextEpisode();
+      if (next) {
         e.preventDefault();
       }
     }
@@ -1650,51 +1731,7 @@ function PlayPageClient() {
 
       // 监听视频播放结束事件，自动播放下一集
       artPlayerRef.current.on('video:ended', () => {
-        const d = detailRef.current;
-        const currentEpisode = currentEpisodeNumberRef.current;
-
-        if (d && d.episodes) {
-          // 如果有episode_numbers数组，查找下一集的实际集数
-          if (d.episode_numbers && d.episode_numbers.length > 0) {
-            const currentIndex = d.episode_numbers.indexOf(currentEpisode);
-
-            if (
-              currentIndex >= 0 &&
-              currentIndex < d.episode_numbers.length - 1
-            ) {
-              const nextEpisode = d.episode_numbers[currentIndex + 1];
-              console.log(`找到下一集: ${nextEpisode}，将在1秒后播放...`);
-              setTimeout(() => {
-                console.log('执行播放下一集...');
-                setCurrentEpisodeNumber(nextEpisode);
-              }, 1000);
-              return;
-            } else {
-              console.log(
-                `已经是最后一集或当前集数未在数组中，currentIndex: ${currentIndex}, 数组长度: ${d.episode_numbers.length}`
-              );
-            }
-          } else {
-            console.log('没有episode_numbers数组，使用传统索引方式...');
-            // 传统方式：直接使用索引+1
-            if (currentEpisode < d.episodes.length) {
-              const nextEpisode = currentEpisode + 1;
-              console.log(
-                `传统方式：将播放第${nextEpisode}集，将在1秒后执行...`
-              );
-              setTimeout(() => {
-                console.log('执行播放下一集...');
-                setCurrentEpisodeNumber(nextEpisode);
-              }, 1000);
-            } else {
-              console.log(
-                `已经是最后一集，currentEpisode: ${currentEpisode}, episodes.length: ${d.episodes.length}`
-              );
-            }
-          }
-        } else {
-          console.log('没有源数据，无法播放下一集');
-        }
+        handleNextEpisode(1000);
         console.log('=== 自动播放下一集处理结束 ===');
       });
 

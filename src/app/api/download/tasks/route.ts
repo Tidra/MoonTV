@@ -1,15 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import {
-  getAllServerDownloadTasks,
-  saveServerDownloadTask,
-} from '@/lib/download-executor';
 import logger from '@/lib/logger';
 import {
   calculateNextRun,
   deleteServerDownloadTask,
+  getAllServerDownloadTasks,
   getServerDownloadTaskById,
-} from '@/lib/server-download';
+  saveServerDownloadTask,
+} from '@/lib/serverDownload';
 
 // GET /api/download/tasks - 获取所有下载任务或根据title查询特定任务
 export async function GET(request: NextRequest) {

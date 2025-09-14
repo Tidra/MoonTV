@@ -4,7 +4,7 @@ import logger from '@/lib/logger';
 import {
   getServerCachedVideosById,
   getServerCachedVideosByTitle,
-} from '@/lib/server-download';
+} from '@/lib/serverDownload';
 
 // GET /api/download/search - 视频搜索
 export async function GET(request: NextRequest) {

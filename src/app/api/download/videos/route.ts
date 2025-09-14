@@ -2,16 +2,14 @@ import fs from 'fs';
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 
-import {
-  getAllServerCachedVideos,
-  getBaseDownloadPath,
-} from '@/lib/download-executor';
 import logger from '@/lib/logger';
 import {
   deleteServerCachedVideo,
+  getAllServerCachedVideos,
+  getBaseDownloadPath,
   getServerCachedVideosById,
   getServerCachedVideosByTitle,
-} from '@/lib/server-download';
+} from '@/lib/serverDownload';
 
 // GET /api/download/videos - 获取所有视频信息
 export async function GET(request: NextRequest) {
