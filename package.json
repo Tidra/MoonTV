@@ -1,9 +1,10 @@
 {
+  "$schema": "https://json.schemastore.org/package.json",
   "name": "moontv",
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "pnpm gen:runtime && pnpm gen:manifest && node start.js",
+    "dev": "pnpm gen:runtime && pnpm gen:manifest && pnpm node start.js",
     "build": "pnpm gen:runtime && pnpm gen:manifest && next build",
     "start": "next start",
     "lint": "next lint",

@@ -143,13 +143,7 @@ async function downloadM3u8AsHttp(url, filePath) {
     const parsedUrl = new URL(url);
     const client = parsedUrl.protocol === 'https:' ? https : http;
 
-    // 确保文件扩展名为.mp4
-    let mp4FilePath = filePath;
-    if (!filePath.endsWith('.mp4')) {
-      mp4FilePath = filePath.replace(/\.[^/.]+$/, '') + '.mp4';
-    }
-
-    const fileStream = fsPromises.createWriteStream(mp4FilePath);
+    const fileStream = fsPromises.createWriteStream(filePath);
 
     const request = client.get(url, (response) => {
       // 检查响应状态
@@ -160,7 +154,7 @@ async function downloadM3u8AsHttp(url, filePath) {
         );
         fileStream.close();
         fsPromises
-          .unlink(mp4FilePath)
+          .unlink(filePath)
           .catch((err) => {
             sendMessage('error', `删除部分下载的文件失败: ${err.message}`);
           })
@@ -204,7 +198,7 @@ async function downloadM3u8AsHttp(url, filePath) {
 
       fileStream.on('finish', () => {
         fileStream.close();
-        sendMessage('info', `m3u8文件下载完成: ${mp4FilePath}`);
+        sendMessage('info', `m3u8文件下载完成: ${filePath}`);
         sendMessage(
           'info',
           `总下载大小: ${(downloadedBytes / (1024 * 1024)).toFixed(2)} MB`
@@ -222,7 +216,7 @@ async function downloadM3u8AsHttp(url, filePath) {
       sendMessage('error', `HTTP请求失败: ${err.message}`);
       fileStream.close();
       fsPromises
-        .unlink(mp4FilePath)
+        .unlink(filePath)
         .catch((unlinkErr) => {
           sendMessage('error', `删除部分下载的文件失败: ${unlinkErr.message}`);
         })
@@ -236,7 +230,7 @@ async function downloadM3u8AsHttp(url, filePath) {
       request.destroy();
       fileStream.close();
       fsPromises
-        .unlink(mp4FilePath)
+        .unlink(filePath)
         .catch((unlinkErr) => {
           sendMessage('error', `删除部分下载的文件失败: ${unlinkErr.message}`);
         })

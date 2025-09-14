@@ -60,7 +60,7 @@ async function initConfig() {
     const fs = _require('fs') as typeof import('fs');
     const path = _require('path') as typeof import('path');
 
-    const configPath = path.join(process.cwd(), 'config.json');
+    const configPath = path.join(process.cwd(), 'config', 'config.json');
     const raw = fs.readFileSync(configPath, 'utf-8');
     fileConfig = JSON.parse(raw) as ConfigFileStruct;
     console.log('load dynamic config success');

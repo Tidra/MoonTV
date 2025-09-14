@@ -450,6 +450,12 @@ export function stopDownloadTask(taskId: string): boolean {
   if (subProcess) {
     // 终止子进程
     subProcess.kill('SIGTERM');
+    // 1秒后检查进程是否仍在运行，如果是则使用SIGKILL
+    setTimeout(() => {
+      if (!subProcess.killed) {
+        subProcess.kill('SIGKILL');
+      }
+    }, 1000);
     runningTasks.delete(taskId);
     logger.info(`任务 ${taskId} 的下载进程已停止`);
 

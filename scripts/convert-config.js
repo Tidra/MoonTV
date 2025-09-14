@@ -10,7 +10,7 @@ const path = require('path');
 const projectRoot = path.resolve(__dirname, '..');
 
 // Paths
-const configPath = path.join(projectRoot, 'config.json');
+const configPath = path.join(projectRoot, 'config', 'config.json');
 const libDir = path.join(projectRoot, 'src', 'lib');
 const oldRuntimePath = path.join(libDir, 'runtime.ts');
 const newRuntimePath = path.join(libDir, 'runtime.ts');

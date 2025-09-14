@@ -23,18 +23,30 @@ function generateManifest() {
 
 generateManifest();
 
-// 直接在当前进程中启动 Next.js 开发服务器
-const { spawn } = require('child_process');
+// 生产环境直接在当前进程中启动 standalone Server（`server.js`）
+if (process.env.NODE_ENV === 'production') {
+  require('./server.js');
+} else {
+  const { spawn } = require('child_process'); // 添加这一行
+  // 非生产环境，使用child_process启动Next.js开发服务器
+  console.log('Starting Next.js development server...');
 
-// 在子进程中启动 Next.js 开发服务器
-const nextDev = spawn('npx', ['next', 'dev'], {
-  stdio: 'inherit',
-  shell: true,
-});
+  // 启动Next.js开发服务器
+  const nextProcess = spawn('npx', ['next', 'dev', '-H', '0.0.0.0'], {
+    stdio: 'inherit', // 继承标准输入输出
+    shell: true, // 在shell中运行命令，确保Windows兼容性
+  });
 
-nextDev.on('close', (code) => {
-  console.log(`Next.js dev server exited with code ${code}`);
-});
+  nextProcess.on('close', (code) => {
+    console.log(`Next.js process exited with code ${code}`);
+    process.exit(code);
+  });
+
+  nextProcess.on('error', (error) => {
+    console.error('Failed to start Next.js server:', error);
+    process.exit(1);
+  });
+}
 
 // 改进的启动检查机制 - 动态检测端口
 function getTargetUrl() {
@@ -137,7 +149,6 @@ const intervalId = setInterval(() => {
       'Server startup check timeout, proceeding with cron jobs anyway.'
     );
     clearInterval(intervalId);
-    startCronJobs();
     return;
   }
 
@@ -161,7 +172,6 @@ const intervalId = setInterval(() => {
         })
         .catch((err) => {
           console.error('Failed to get authentication cookie:', err);
-          startCronJobs();
         });
     }
   });
@@ -174,7 +184,6 @@ const intervalId = setInterval(() => {
         err
       );
       clearInterval(intervalId);
-      startCronJobs();
     }
   });
 
