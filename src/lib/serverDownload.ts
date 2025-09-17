@@ -1,4 +1,5 @@
-import { ChildProcess, spawn } from 'child_process';
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { ChildProcess, fork } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { promisify } from 'util';
@@ -6,9 +7,9 @@ import { promisify } from 'util';
 import { fetchVideoDetail } from '@/lib/fetchVideoDetail';
 import logger from '@/lib/logger';
 import {
+  ChildProcessMessage,
   SearchResult,
   ServerCachedVideo,
-  ServerDownloadStatus,
   ServerDownloadTask,
 } from '@/lib/types';
 
@@ -199,42 +200,6 @@ export async function deleteServerCachedVideo(uniqueId: string): Promise<void> {
   }
 }
 
-// 获取下载状态
-export async function getServerDownloadStatus(
-  taskId: string
-): Promise<ServerDownloadStatus | null> {
-  try {
-    const filePath = path.join(
-      process.cwd(),
-      'data',
-      `download-status-${taskId}.json`
-    );
-    const raw = await fsPromises.readFile(filePath, 'utf-8').catch(() => null);
-    return raw ? JSON.parse(raw) : null;
-  } catch (err) {
-    logger.error(`读取下载状态失败:`, err);
-    return null;
-  }
-}
-
-// 更新下载状态
-export async function updateServerDownloadStatus(
-  status: ServerDownloadStatus
-): Promise<void> {
-  try {
-    const dataDir = path.join(process.cwd(), 'data');
-    await ensureDir(dataDir);
-    const filePath = path.join(
-      dataDir,
-      `download-status-${status.taskId}.json`
-    );
-    await fsPromises.writeFile(filePath, JSON.stringify(status, null, 2));
-  } catch (err) {
-    logger.error(`更新下载状态失败:`, err);
-    throw err;
-  }
-}
-
 // 解析Cron表达式并计算下次运行时间
 export function calculateNextRun(
   cronExpression: string,
@@ -382,8 +347,8 @@ export async function getServerCachedVideosByTitle(
               )}`
           ),
           episode_numbers: sortedVideos.map((video) => video.episode_number),
-          source: firstVideo.source,
-          source_name: firstVideo.source_name,
+          source: 'server_cache',
+          source_name: '服务器缓存',
           class: firstVideo.class,
           year: firstVideo.year,
           desc: firstVideo.desc,
@@ -429,8 +394,8 @@ export async function getServerCachedVideosById(
             `/api/download/file?path=${encodeURIComponent(video.episode_path)}`
         ),
         episode_numbers: sortedVideos.map((video) => video.episode_number),
-        source: firstVideo.source,
-        source_name: firstVideo.source_name,
+        source: 'server_cache',
+        source_name: '服务器缓存',
         class: firstVideo.class,
         year: firstVideo.year,
         desc: firstVideo.desc,
@@ -444,22 +409,42 @@ export async function getServerCachedVideosById(
   }
 }
 
+// 获取所有下载任务
+export async function getAllDownloadTasks(): Promise<string[]> {
+  return [...runningTasks.keys()];
+}
+
 // 停止指定任务的下载进程
 export function stopDownloadTask(taskId: string): boolean {
   const subProcess = runningTasks.get(taskId);
-  if (subProcess) {
-    // 终止子进程
-    subProcess.kill('SIGTERM');
-    // 1秒后检查进程是否仍在运行，如果是则使用SIGKILL
-    setTimeout(() => {
-      if (!subProcess.killed) {
-        subProcess.kill('SIGKILL');
-      }
-    }, 1000);
-    runningTasks.delete(taskId);
-    logger.info(`任务 ${taskId} 的下载进程已停止`);
+  const runningFlagPath = path.join(
+    process.cwd(),
+    'data',
+    `download-task-${taskId}.running`
+  );
+  // 检查并删除运行标记文件
+  if (fs.existsSync(runningFlagPath)) {
+    fs.unlinkSync(runningFlagPath);
+  }
 
-    return true;
+  if (subProcess) {
+    try {
+      subProcess.kill('SIGTERM');
+
+      // 1秒后检查进程是否仍在运行，如果是则使用SIGKILL强制终止
+      setTimeout(() => {
+        if (!subProcess.killed) {
+          subProcess.kill('SIGKILL');
+        }
+        runningTasks.delete(taskId);
+        logger.info(`任务 ${taskId} 的下载进程已停止`);
+      }, 1000);
+
+      return true;
+    } catch (error) {
+      logger.error(`停止任务 ${taskId} 的进程时出错:`, error);
+      return false;
+    }
   }
   logger.info(`未找到任务 ${taskId} 的运行进程`);
   return false;
@@ -583,38 +568,16 @@ export async function executeDownloadTask(task: ServerDownloadTask) {
       totalEpisodes,
       cachedEpisodes,
       fullDownloadPath,
-      runningFlagPath,
     };
 
     // 使用独立的下载执行器模块
     const executorPath = path.resolve(
       process.cwd(),
       'scripts',
-      'download-executor.js'
+      'download-executor.mjs'
     );
-    const taskProcess = spawn('node', [
-      '-e',
-      `
-      const { executeDownloadJob } = require('${executorPath.replace(
-        /\\/g,
-        '\\\\'
-      )}');
-      const taskData = JSON.parse(process.argv[1]);
-      executeDownloadJob(
-        taskData.task,
-        taskData.videoDetail,
-        taskData.startEpisode,
-        taskData.totalEpisodes,
-        taskData.cachedEpisodes,
-        taskData.fullDownloadPath,
-        taskData.runningFlagPath
-      ).catch(err => {
-        console.error('下载任务执行失败:', err);
-        process.exit(1);
-      });
-      `,
-      JSON.stringify(taskData),
-    ]);
+
+    const taskProcess = fork(executorPath, [JSON.stringify(taskData)]);
 
     // 存储进程引用
     runningTasks.set(task.id, taskProcess);
@@ -622,96 +585,92 @@ export async function executeDownloadTask(task: ServerDownloadTask) {
     logger.info(`任务 ${task.title} 已启动，PID: ${taskProcess.pid}`);
     let errorStop = false;
 
-    taskProcess.stdout.on('data', async (data) => {
-      const output = data.toString().trim();
-      // 按行分割输出，处理每一行消息
-      const lines = output.split('\n');
+    // 修复类型错误：为message参数添加类型断言或类型守卫
+    taskProcess.on('message', async (message: unknown) => {
+      // 使用类型守卫确保message具有正确的结构
+      if (
+        typeof message === 'object' &&
+        message !== null &&
+        'type' in message
+      ) {
+        const typedMessage = message as ChildProcessMessage;
 
-      for (const line of lines) {
-        if (!line) continue;
-
-        try {
-          // 尝试解析 JSON 格式消息
-          const message = JSON.parse(line);
-
-          // 处理下载完成消息
-          if (message.type === 'download_complete') {
-            const { episodeNumber, filePath } = message.data;
-
-            // 保存缓存视频记录
-            try {
-              const cachedVideo: ServerCachedVideo = {
-                id: task.id,
-                unique_id: `video_${task.id}_${episodeNumber}`,
-                title: task.title,
-                poster: videoDetail.poster || '',
-                episode_path: path.relative(baseDownloadPath, filePath),
-                episode_number: episodeNumber,
-                source: task.source,
-                source_name: videoDetail.source_name || '',
-                class: videoDetail.class,
-                year: videoDetail.year || '',
-                desc: videoDetail.desc,
-                type_name: videoDetail.type_name,
-                douban_id: videoDetail.douban_id,
-                org_source: videoDetail.source || '',
-                org_source_id: videoDetail.id || '',
-                download_time: Date.now(),
-              };
-              await saveServerCachedVideo(cachedVideo);
-            } catch (err) {
-              logger.error(`保存第${episodeNumber}集缓存记录失败:`, err);
-            }
-
-            // 更新任务集数
-            if (!errorStop) {
-              try {
-                task.startEpisode = episodeNumber + 1;
-                task.updatedAt = Date.now();
-                await saveServerDownloadTask(task);
-              } catch (err) {
-                logger.error(`更新任务集数记录失败:`, err);
-              }
-            }
-
-            logger.info(
-              `[任务 ${task.title} 信息]: 第${episodeNumber}集下载完成: ${filePath}`
+        if (typedMessage.type === 'info') {
+          logger.info(`[任务 ${task.title}] 输出: ${typedMessage.data}`);
+        } else if (typedMessage.type === 'error') {
+          logger.error(`[任务 ${task.title}] 错误: ${typedMessage.data}`);
+        } else if (typedMessage.type === 'download_complete') {
+          logger.info(
+            `[任务 ${task.title}] 第${typedMessage.data.episodeNumber}集下载完成，文件路径: ${typedMessage.data.filePath}`
+          );
+          // 保存缓存视频记录
+          try {
+            const cachedVideo: ServerCachedVideo = {
+              id: task.id,
+              unique_id: `video_${task.id}_${typedMessage.data.episodeNumber}`,
+              title: task.title,
+              poster: videoDetail.poster || '',
+              episode_path: path.relative(
+                baseDownloadPath,
+                typedMessage.data.filePath
+              ),
+              episode_number: typedMessage.data.episodeNumber,
+              source: 'server_cache',
+              source_name: '服务器缓存',
+              class: videoDetail.class,
+              year: videoDetail.year || '',
+              desc: videoDetail.desc,
+              type_name: videoDetail.type_name,
+              douban_id: videoDetail.douban_id,
+              org_source: videoDetail.source || '',
+              org_source_id: videoDetail.id || '',
+              download_time: Date.now(),
+            };
+            await saveServerCachedVideo(cachedVideo);
+          } catch (err) {
+            logger.error(
+              `[任务 ${task.title}] 保存第${typedMessage.data.episodeNumber}集缓存记录失败:`,
+              err
             );
-          } else if (message.type === 'info') {
-            logger.info(`[任务 ${task.title} 信息]: ${message.data}`);
           }
-        } catch (err) {
-          // 非JSON格式或解析错误时，作为普通日志输出
-          logger.info(`任务 ${task.title} 输出: ${line}`);
-        }
-      }
-    });
 
-    taskProcess.stderr.on('data', (data) => {
-      const output = data.toString().trim();
-      // 尝试解析错误输出中的JSON消息
-      try {
-        const message = JSON.parse(output);
-        if (message.type === 'download_error') {
-          logger.error(`[任务 ${task.title} 错误]: ${message.data}`);
-          errorStop = true;
-        } else if (message.type === 'error') {
-          logger.error(`[任务 ${task.title} 错误]: ${message.data}`);
+          // 更新任务集数
+          if (!errorStop) {
+            try {
+              task.startEpisode = typedMessage.data.episodeNumber + 1;
+              task.updatedAt = Date.now();
+              await saveServerDownloadTask(task);
+            } catch (err) {
+              logger.error(`[任务 ${task.title}] 更新任务集数记录失败:`, err);
+            }
+          }
+        } else if (typedMessage.type === 'download_error') {
+          logger.error(`[任务 ${task.title}] 下载错误:`, typedMessage.data);
           errorStop = true;
         }
-      } catch (err) {
-        logger.error(`[任务 ${task.title} 错误输出]: ${output}`);
       }
     });
 
     taskProcess.on('close', (code) => {
-      logger.info(`任务 ${task.title} 已完成，退出码: ${code}`);
+      logger.info(`[任务 ${task.title}] 已完成，退出码: ${code}`);
       runningTasks.delete(task.id);
+      // 删除运行标记文件
+      try {
+        fs.unlinkSync(runningFlagPath);
+      } catch (err) {
+        // 忽略错误
+      }
     });
 
     taskProcess.on('error', (error) => {
-      logger.error(`任务 ${task.title} 启动失败:`, error);
+      logger.error(`[任务 ${task.title}] 启动失败:`, error);
       runningTasks.delete(task.id);
+      // 删除运行标记文件
+      try {
+        fs.unlinkSync(runningFlagPath);
+      } catch (err) {
+        // 忽略错误
+      }
     });
   } catch (error) {
     // 删除运行标记文件
@@ -720,7 +679,7 @@ export async function executeDownloadTask(task: ServerDownloadTask) {
     } catch (err) {
       // 忽略错误
     }
-    logger.error(`执行任务 ${task.title} 时出错:`, error);
+    logger.error(`[任务 ${task.title}] 执行任务时出错:`, error);
     throw error; // 重新抛出错误以便上层捕获
   }
 }

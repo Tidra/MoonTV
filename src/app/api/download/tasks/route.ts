@@ -44,6 +44,7 @@ export async function POST(request: NextRequest) {
       totalEpisodes,
       downloadPath,
       cronExpression,
+      downloadTimeout,
       enabled,
     } = body;
 
@@ -73,6 +74,7 @@ export async function POST(request: NextRequest) {
       totalEpisodes: totalEp,
       downloadPath: downloadPath || '',
       cronExpression,
+      downloadTimeout: downloadTimeout || 3600, // 默认1小时
       enabled: taskEnabled,
       createdAt: now,
       updatedAt: now,
@@ -113,6 +115,7 @@ export async function PUT(request: NextRequest) {
       totalEpisodes,
       downloadPath,
       cronExpression,
+      downloadTimeout,
       enabled,
     } = body;
 
@@ -149,6 +152,10 @@ export async function PUT(request: NextRequest) {
       downloadPath:
         downloadPath !== undefined ? downloadPath : existingTask.downloadPath,
       cronExpression: cronExpression || existingTask.cronExpression,
+      downloadTimeout:
+        downloadTimeout !== undefined
+          ? downloadTimeout
+          : existingTask.downloadTimeout,
       enabled: taskEnabled,
       createdAt: existingTask.createdAt,
       updatedAt: now,

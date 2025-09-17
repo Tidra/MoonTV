@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { AdminConfig } from './admin.types';
 
 // 播放记录数据结构
@@ -41,6 +42,7 @@ export interface ServerDownloadTask {
   enabled: boolean;
   createdAt: number;
   updatedAt: number;
+  downloadTimeout?: number; // 下载超时时间（毫秒），新增字段
 }
 
 // 服务器端缓存视频接口
@@ -158,11 +160,8 @@ export interface SkipConfig {
   outro_time: number; // 片尾时间（秒）
 }
 
-// 下载状态接口
-export interface ServerDownloadStatus {
-  taskId: string;
-  episode: number;
-  status: 'pending' | 'downloading' | 'completed' | 'failed';
-  progress: number;
-  error?: string;
+// 添加消息类型定义
+export interface ChildProcessMessage {
+  type: 'info' | 'error' | 'download_complete' | 'download_error';
+  data: any;
 }

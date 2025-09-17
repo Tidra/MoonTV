@@ -25,6 +25,7 @@ import { SearchResult } from '@/lib/types';
 import { getVideoResolutionFromM3u8, processImageUrl } from '@/lib/utils';
 
 import EpisodeSelector from '@/components/EpisodeSelector';
+import Notification from '@/components/Notification';
 import PageLayout from '@/components/PageLayout';
 import ScheduleDownloadModal from '@/components/ScheduleDownloadModal';
 
@@ -49,6 +50,12 @@ function PlayPageClient() {
   const [loadingMessage, setLoadingMessage] = useState('正在搜索播放源...');
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<SearchResult | null>(null);
+
+  // 通知状态
+  const [notification, setNotification] = useState<{
+    message: string;
+    type: 'info' | 'error' | 'success' | 'warning';
+  } | null>(null);
 
   // 收藏状态
   const [favorited, setFavorited] = useState(false);
@@ -1428,34 +1435,34 @@ function PlayPageClient() {
       artPlayerRef.current = new Artplayer({
         container: artRef.current,
         url: videoUrl,
-        poster: videoCover,
-        volume: 0.7,
-        isLive: false,
-        muted: false,
-        autoplay: true,
-        pip: true,
-        autoSize: false,
-        autoMini: false,
-        screenshot: false,
-        setting: true,
-        loop: false,
-        flip: false,
-        playbackRate: true,
-        aspectRatio: false,
-        fullscreen: true,
-        fullscreenWeb: true,
-        subtitleOffset: false,
-        miniProgressBar: false,
-        mutex: true,
-        playsInline: true,
-        autoPlayback: false,
-        airplay: true,
-        theme: '#22c55e',
+        poster: videoCover, //视频的海报，只会出现在播放器初始化且未播放的状态下
+        volume: 0.7, // 默认音量
+        isLive: false, //使用直播模式，会隐藏进度条和播放时间
+        muted: false, //是否默认静音
+        autoplay: true, // 自动播放
+        pip: true, // 在底部控制栏里显示 画中画 的开关按钮
+        autoSize: false, // 自动调整播放器尺寸以隐藏黑边
+        autoMini: false, // 当播放器滚动到浏览器视口以外时，自动进入 迷你播放 模式
+        screenshot: false, // 在底部控制栏里显示 视频截图 功能 提示由于浏览器安全机制，假如视频源地址和网站是跨域的，可能会出现截图失败
+        setting: true, // 设置面板
+        loop: false, //是否循环播放
+        flip: false, // 显示视频翻转功能
+        playbackRate: true, // 显示视频播放速度功能
+        aspectRatio: false, // 显示视频长宽比功能
+        fullscreen: true, // 在底部控制栏里显示播放器 窗口全屏 按钮
+        fullscreenWeb: true, //是否在底部控制栏里显示播放器 网页全屏 按钮
+        subtitleOffset: false, //字幕时间偏移，范围在 [-5s, 5s]，出现在 设置面板 里
+        miniProgressBar: true, // 迷你进度条，只在播放器失去焦点后且正在播放时出现
+        mutex: true, //假如页面里同时存在多个播放器，是否只能让一个播放器播放
+        playsInline: true, // 移动端 playsInline 模式
+        autoPlayback: false, //是否使用自动 回放功能
+        airplay: true, // 显示 airplay 按钮
+        theme: '#22c55e', // 主题色
         lang: 'zh-cn',
-        hotkey: false,
-        fastForward: true,
-        autoOrientation: true,
-        lock: true,
+        hotkey: false, //是否使用快捷键
+        fastForward: true, // 移动端添加长按视频快进功能
+        autoOrientation: true, // 是否在移动端的网页全屏时，根据视频尺寸和视口尺寸，旋转播放器
+        lock: true, // 移动端显示一个 锁定按钮 ，用于隐藏底部 控制栏
         moreVideoAttr: {
           crossOrigin: 'anonymous',
         },
@@ -1949,6 +1956,16 @@ function PlayPageClient() {
             )}
           </h1>
         </div>
+
+        {/* 通知组件 */}
+        {notification && (
+          <Notification
+            message={notification.message}
+            type={notification.type}
+            onClose={() => setNotification(null)}
+          />
+        )}
+
         {/* 第二行：播放器和选集 */}
         <div className='space-y-2'>
           {/* 折叠控制 - 仅在 lg 及以上屏幕显示 */}

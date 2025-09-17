@@ -38,6 +38,7 @@ export default function ScheduleDownloadModal({
     downloadPath: '',
     cronExpression: '0 2 * * *', // 每天凌晨2点
     enabled: true,
+    downloadTimeout: 3600, // 默认1小时超时，新增字段
   });
   const [loading, setLoading] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
@@ -58,6 +59,10 @@ export default function ScheduleDownloadModal({
           cronExpression: initialTask.cronExpression || '0 2 * * *',
           enabled:
             initialTask.enabled !== undefined ? initialTask.enabled : true,
+          downloadTimeout:
+            initialTask.downloadTimeout !== undefined
+              ? initialTask.downloadTimeout
+              : 3600, // 默认1小时超时，新增字段
         });
       }
       // 否则检查是否已存在相同视频的定时任务
@@ -82,6 +87,10 @@ export default function ScheduleDownloadModal({
                   existingTask.enabled !== undefined
                     ? existingTask.enabled
                     : true,
+                downloadTimeout:
+                  existingTask.downloadTimeout !== undefined
+                    ? existingTask.downloadTimeout
+                    : 3600, // 默认1小时超时，新增字段
               });
             } else {
               // 设置默认下载路径，为每个剧集创建独立文件夹（使用相对路径）
@@ -167,6 +176,7 @@ export default function ScheduleDownloadModal({
           downloadPath: formData.downloadPath,
           cronExpression: formData.cronExpression,
           enabled: formData.enabled,
+          downloadTimeout: Number(formData.downloadTimeout), // 新增字段
         };
 
         response = await fetch(`/api/download/tasks?id=${taskId}`, {
@@ -187,6 +197,7 @@ export default function ScheduleDownloadModal({
           downloadPath: formData.downloadPath,
           cronExpression: formData.cronExpression,
           enabled: formData.enabled,
+          downloadTimeout: Number(formData.downloadTimeout), // 新增字段
         };
 
         response = await fetch('/api/download/tasks', {
@@ -384,6 +395,29 @@ export default function ScheduleDownloadModal({
               />
               <p className='mt-1 text-sm text-gray-500 dark:text-gray-400'>
                 Cron表达式，用于设置定时任务的执行时间
+              </p>
+            </div>
+
+            <div>
+              <label
+                htmlFor='downloadTimeout'
+                className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'
+              >
+                下载超时时间（秒）
+              </label>
+              <input
+                type='number'
+                id='downloadTimeout'
+                name='downloadTimeout'
+                value={formData.downloadTimeout}
+                onChange={handleChange}
+                min='5'
+                max='300000'
+                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 dark:bg-gray-800 dark:text-gray-300 dark:placeholder-gray-500 dark:focus:bg-gray-700 text-gray-900'
+                placeholder='3600（1小时）'
+              />
+              <p className='mt-1 text-sm text-gray-500 dark:text-gray-400'>
+                下载任务的超时时间，单位为秒，默认为3600秒（1小时）
               </p>
             </div>
 

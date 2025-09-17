@@ -5,6 +5,7 @@
  */
 
 interface Logger {
+  debug: (...args: unknown[]) => void;
   log: (...args: unknown[]) => void;
   error: (...args: unknown[]) => void;
   warn: (...args: unknown[]) => void;
@@ -17,7 +18,7 @@ interface Logger {
  * @returns 格式化后的日志消息
  */
 function formatLogMessage(...args: unknown[]): string {
-  const timestamp = new Date().toISOString();
+  const timestamp = new Date().toLocaleString();
   const message = args
     .map((arg) => {
       if (typeof arg === 'object') {
@@ -37,6 +38,15 @@ function formatLogMessage(...args: unknown[]): string {
  * 带时间戳的日志工具
  */
 export const logger: Logger = {
+  /**
+   * 调试日志输出
+   */
+  debug: (...args: unknown[]): void => {
+    if (process.env.NODE_ENV === 'development') {
+      console.debug(formatLogMessage(...args));
+    }
+  },
+
   /**
    * 普通日志输出
    */

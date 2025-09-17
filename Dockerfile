@@ -43,8 +43,11 @@ RUN pnpm run build
 # ---- 第 3 阶段：生成运行时镜像 ----
 FROM node:20-alpine AS runner
 
-# 安装运行时依赖，包括ffmpeg
-RUN apk add --no-cache ffmpeg
+# 安装运行时依赖，包括ffmpeg和tzdata时区包
+RUN apk add --no-cache ffmpeg tzdata
+
+# 设置时区为中国上海
+ENV TZ=Asia/Shanghai
 
 # 创建非 root 用户
 RUN addgroup -g 1001 -S nodejs && adduser -u 1001 -S nextjs -G nodejs

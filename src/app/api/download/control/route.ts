@@ -1,10 +1,9 @@
-import fs from 'fs';
 import { NextRequest, NextResponse } from 'next/server';
-import path from 'path';
 
 import logger from '@/lib/logger';
 import {
   executeDownloadTask,
+  getAllDownloadTasks,
   getAllServerDownloadTasks,
   getServerDownloadTaskById,
   saveServerDownloadTask,
@@ -20,21 +19,7 @@ export async function GET(request: NextRequest) {
     // 获取下载状态
     if (action === 'status') {
       // 检查所有任务的运行标记文件以确定哪些任务正在下载
-      const tasks = await getAllServerDownloadTasks();
-      const downloadingTasks: string[] = [];
-
-      for (const task of tasks) {
-        const runningFlagPath = path.join(
-          process.cwd(),
-          'data',
-          `download-task-${task.id}.running`
-        );
-        const isRunning = fs.existsSync(runningFlagPath);
-
-        if (isRunning) {
-          downloadingTasks.push(task.id);
-        }
-      }
+      const downloadingTasks = await getAllDownloadTasks();
 
       // 返回当前正在下载的任务ID列表
       return NextResponse.json({
@@ -93,16 +78,6 @@ export async function POST(request: NextRequest) {
 
       // 停止任务进程
       const stopped = stopDownloadTask(id);
-
-      // 删除运行标记文件
-      const runningFlagPath = path.join(
-        process.cwd(),
-        'data',
-        `download-task-${id}.running`
-      );
-      if (fs.existsSync(runningFlagPath)) {
-        fs.unlinkSync(runningFlagPath);
-      }
 
       if (stopped) {
         return NextResponse.json({ success: true, message: '任务已停止' });
