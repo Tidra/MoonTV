@@ -41,6 +41,7 @@ function execWithTracking(cmd, cmdArgs) {
 
     // 保存进程引用以便后续可能的终止操作
     currentFfmpegProcess = ffmpegProcess;
+    sendMessage('info', `ffmpeg进程ID: ${ffmpegProcess.pid}`);
 
     // 监听进程关闭事件
     ffmpegProcess.on('close', (code, signal) => {
@@ -147,91 +148,115 @@ async function downloadWithHttp(url, filePath, downloadTimeout = 3600) {
 async function downloadWithFFmpeg(url, filePath, downloadTimeout = 3600) {
   // 将路径转换为mp4
   const mp4FilePath = changeMp4Extension(filePath, true);
+  const mp4FilePathFormatted = mp4FilePath.replace(/\\/g, '/');
 
-  return new Promise((resolve) => {
-    let timeoutId;
+  // 创建超时控制器
+  let timeoutId = null;
+  let isTimedOut = false;
 
-    // 创建新的超时计时器的函数
-    const createTimeout = () => {
-      // 清除之前可能存在的计时器
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
+  // 清理函数
+  const cleanup = () => {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      timeoutId = null;
+    }
+  };
 
-      // 创建新的超时计时器
+  try {
+    await new Promise((resolve, reject) => {
+      // 创建超时计时器
       timeoutId = setTimeout(() => {
+        isTimedOut = true;
         sendMessage('error', `ffmpeg执行超时（${downloadTimeout}秒）`);
         // 尝试杀死ffmpeg进程
         if (currentFfmpegProcess) {
           try {
             currentFfmpegProcess.kill('SIGKILL');
           } catch (error) {
-            sendMessage('error', `终止超时ffmpeg进程失败: ${error.message}`);
+            sendMessage('error', `终止超时ffmpeg进程失败, 进程ID: ${currentFfmpegProcess.pid}: ${error.message}`);
           }
         }
-        resolve(false);
+        reject(new Error(`下载超时: ${downloadTimeout}秒`));
       }, downloadTimeout * 1000);
-    };
 
-    // 执行ffmpeg转码的异步函数
-    const executeFFmpeg = async () => {
-      try {
-        // 首先尝试转码
-        createTimeout();
-
-        const mp4FilePathFormatted = mp4FilePath.replace(/\\/g, '/');
-
-        await execWithTracking('ffmpeg', [
-          '-y',
-          '-allowed_extensions', 'ALL',
-          '-i', url,
-          '-c:v', 'libx264',
-          '-c:a', 'aac',
-          '-strict', 'experimental',
-          mp4FilePathFormatted
-        ]);
-
-        clearTimeout(timeoutId); // 清除超时计时器
-        sendMessage(
-          'info',
-          `m3u8视频下载并转码完成: ${mp4FilePathFormatted}`
-        );
-        resolve(true);
-      } catch (transcodeError) {
-        sendMessage('error', `ffmpeg转码失败: ${transcodeError.message}`);
-        // 如果转码失败，尝试直接复制流
-        sendMessage('info', '尝试直接复制流...');
+      // 执行下载任务的内部函数
+      const executeDownload = async () => {
         try {
-          createTimeout();
+          // 首先尝试转码
+          try {
+            await execWithTracking('ffmpeg', [
+              '-y',
+              '-allowed_extensions', 'ALL',
+              '-i', url,
+              '-c:v', 'libx264',
+              '-c:a', 'aac',
+              '-strict', 'experimental',
+              mp4FilePathFormatted
+            ]);
 
-          const mp4FilePathFormatted = mp4FilePath.replace(/\\/g, '/');
+            if (isTimedOut) return; // 检查是否已超时
 
-          await execWithTracking('ffmpeg', [
-            '-y',
-            '-allowed_extensions', 'ALL',
-            '-i', url,
-            '-c', 'copy',
-            mp4FilePathFormatted
-          ]);
+            sendMessage('info', `m3u8视频下载并转码完成: ${mp4FilePathFormatted}`);
+            resolve(true);
+          } catch (transcodeError) {
+            if (isTimedOut) return; // 检查是否已超时
 
-          clearTimeout(timeoutId);
-          sendMessage(
-            'info',
-            `m3u8视频下载完成(直接复制流): ${mp4FilePathFormatted}`
-          );
-          resolve(true);
-        } catch (copyError) {
-          clearTimeout(timeoutId);
-          sendMessage('error', `ffmpeg直接复制流失败: ${copyError.message}`);
-          // 如果ffmpeg命令失败，回退到HTTP下载
-          sendMessage('info', 'ffmpeg不可用，回退到HTTP下载...');
-          resolve(await downloadWithHttp(url, filePath, downloadTimeout));
+            sendMessage('error', `ffmpeg转码失败: ${transcodeError.message}`);
+            sendMessage('info', '尝试直接复制流...');
+
+            // 尝试直接复制流
+            await execWithTracking('ffmpeg', [
+              '-y',
+              '-allowed_extensions', 'ALL',
+              '-i', url,
+              '-c', 'copy',
+              mp4FilePathFormatted
+            ]);
+
+            if (isTimedOut) return; // 检查是否已超时
+
+            sendMessage('info', `m3u8视频下载完成(直接复制流): ${mp4FilePathFormatted}`);
+            resolve(true);
+          }
+        } catch (error) {
+          if (isTimedOut) return; // 检查是否已超时
+
+          // 处理复制流失败的情况
+          if (error.message !== `下载超时: ${downloadTimeout}秒`) {
+            sendMessage('error', `ffmpeg操作失败: ${error.message}`);
+            // 如果ffmpeg命令失败，回退到HTTP下载
+            sendMessage('info', 'ffmpeg不可用，回退到HTTP下载...');
+
+            try {
+              const httpResult = await downloadWithHttp(url, filePath, downloadTimeout);
+              if (isTimedOut) return;
+              resolve(httpResult);
+            } catch (httpError) {
+              reject(httpError);
+            }
+          } else {
+            reject(error);
+          }
         }
-      }
-    };
+      };
 
-    executeFFmpeg();
-  });
+      executeDownload().catch(reject);
+    });
+
+    return true;
+  } catch (error) {
+    // 如果是超时错误，直接返回false
+    if (error.message.includes('下载超时')) {
+      return false;
+    }
+
+    // 其他错误也返回false，表示下载失败
+    sendMessage('error', `下载过程中发生错误: ${error.message}`);
+    return false;
+  } finally {
+    // 确保清理资源
+    cleanup();
+  }
 }
 
 // 确保文件扩展名正确
@@ -293,41 +318,24 @@ function extractFileExtensionFromUrl(url) {
 /**
  * 执行下载任务的函数
  * @param task - 任务对象
- * @param videoDetail - 视频详情
- * @param startEpisode - 起始集数
- * @param totalEpisodes - 总集数
- * @param cachedEpisodes - 已缓存的集数
+ * @param downloadEpisodes - 下载集数
  * @param fullDownloadPath - 完整下载路径
- * @param runningFlagPath - 运行标记文件路径
  */
 async function executeDownloadJob(
   task,
-  videoDetail,
-  startEpisode,
-  totalEpisodes,
-  cachedEpisodes,
+  downloadEpisodes,
   fullDownloadPath
 ) {
   let successCount = 0;
   let failCount = 0;
   const downloadTimeout = task.downloadTimeout || 3600;
 
-  for (let i = startEpisode; i <= totalEpisodes; i++) {
-    // 跳过已下载的集数
-    if (cachedEpisodes.includes(i)) {
-      continue;
-    }
-
-    // 检查当前集数是否在视频详情中存在
-    if (!videoDetail.episodes || i > videoDetail.episodes.length) {
-      continue;
-    }
-
-    const episodeUrl = videoDetail.episodes[i - 1];
+  for (const episode of downloadEpisodes) {
+    const episodeUrl = episode.url;
     // 清理文件名中的特殊字符
     const cleanTitle = task.title.replace(/[^\p{L}\p{N}\p{P}\p{S}\p{Z}]/gu, '_');
     // 创建不带后缀的文件名
-    const fileNameWithoutExt = cleanTitle + '_第' + i + '集';
+    const fileNameWithoutExt = cleanTitle + '_第' + episode.episodeNumber + '集';
 
     // 下载视频文件 - 现在传入路径和不带后缀的文件名
     const result = await downloadVideoFile(episodeUrl, fullDownloadPath, fileNameWithoutExt, downloadTimeout);
@@ -336,7 +344,7 @@ async function executeDownloadJob(
       successCount++;
       // 发送下载成功的特定类型消息
       sendMessage('download_complete', {
-        episodeNumber: i,
+        episodeNumber: episode.episodeNumber,
         filePath: result.filePath,
         taskTitle: task.title,
       });
@@ -344,14 +352,14 @@ async function executeDownloadJob(
       failCount++;
       // 发送下载失败的特定类型消息
       sendMessage('download_error', {
-        episodeNumber: i,
+        episodeNumber: episode.episodeNumber,
         taskTitle: task.title,
       });
     }
   }
 
   sendMessage('info', `任务完成，成功: ${successCount}, 失败: ${failCount}`);
-  return { successCount, failCount };
+  process.exit(successCount > 0 ? 0 : 1);
 }
 
 // 从命令行参数获取任务数据
@@ -359,12 +367,29 @@ const taskData = JSON.parse(process.argv[2]);
 // 执行下载任务
 executeDownloadJob(
   taskData.task,
-  taskData.videoDetail,
-  taskData.startEpisode,
-  taskData.totalEpisodes,
-  taskData.cachedEpisodes,
+  taskData.downloadEpisodes,
   taskData.fullDownloadPath
 ).catch(err => {
   console.error('下载任务执行失败:', err);
   process.exit(1);
 });
+
+process.on("message", msg => {
+  if (msg === "terminate") {
+    sendMessage('info', '收到终止信号，正在退出...');
+    try {
+      if (currentFfmpegProcess) {
+        sendMessage('info', `终止FFmpeg进程, 进程ID: ${currentFfmpegProcess.pid}`);
+        currentFfmpegProcess.kill('SIGTERM');
+        setTimeout(() => {
+          if (!currentFfmpegProcess.killed) {
+            sendMessage('error', `FFmpeg进程终止超时，强制退出, 进程ID: ${currentFfmpegProcess.pid}`);
+            currentFfmpegProcess.kill('SIGKILL');
+          }
+        }, 500);
+      }
+    } finally {
+      process.exit(0);
+    }
+  }
+})

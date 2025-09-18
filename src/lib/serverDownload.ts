@@ -410,8 +410,36 @@ export async function getServerCachedVideosById(
 }
 
 // 获取所有下载任务
+// 改进后的实现
 export async function getAllDownloadTasks(): Promise<string[]> {
-  return [...runningTasks.keys()];
+  // 获取当前运行中的任务ID
+  const runningTaskIds = [...runningTasks.keys()];
+
+  // 检查data目录中的锁文件
+  const dataDir = path.join(process.cwd(), 'data');
+  const allTaskIds = new Set(runningTaskIds);
+
+  try {
+    if (fs.existsSync(dataDir)) {
+      const files = fs.readdirSync(dataDir);
+
+      files.forEach((file) => {
+        // 查找以download-task-开头并以.running结尾的文件
+        if (file.startsWith('download-task-') && file.endsWith('.running')) {
+          // 从文件名中提取任务ID
+          const taskId = file
+            .replace('download-task-', '')
+            .replace('.running', '');
+          allTaskIds.add(taskId);
+        }
+      });
+    }
+  } catch (err) {
+    logger.error('读取data目录中的锁文件时出错:', err);
+  }
+
+  // 返回所有唯一的任务ID
+  return Array.from(allTaskIds);
 }
 
 // 停止指定任务的下载进程
@@ -429,16 +457,16 @@ export function stopDownloadTask(taskId: string): boolean {
 
   if (subProcess) {
     try {
-      subProcess.kill('SIGTERM');
+      subProcess.send('terminate');
 
-      // 1秒后检查进程是否仍在运行，如果是则使用SIGKILL强制终止
+      // 2秒后检查进程是否仍在运行，如果是则使用SIGKILL强制终止
       setTimeout(() => {
         if (!subProcess.killed) {
           subProcess.kill('SIGKILL');
         }
         runningTasks.delete(taskId);
         logger.info(`任务 ${taskId} 的下载进程已停止`);
-      }, 1000);
+      }, 2000);
 
       return true;
     } catch (error) {
@@ -460,6 +488,18 @@ export async function executeDownloadTask(task: ServerDownloadTask) {
   // 检查任务是否已经在运行
   if (runningTasks.has(task.id) || fs.existsSync(runningFlagPath)) {
     logger.info(`任务 ${task.title} 已经在运行中`);
+    return;
+  }
+
+  // 检查起始集数是否超过总集数
+  if (task.startEpisode > task.totalEpisodes) {
+    logger.info(
+      `任务 ${task.title} 起始集数(${task.startEpisode})超过总集数(${task.totalEpisodes})，不执行任务`
+    );
+    // 更新任务为停止状态
+    task.enabled = false;
+    task.updatedAt = Date.now();
+    await saveServerDownloadTask(task);
     return;
   }
 
@@ -518,20 +558,34 @@ export async function executeDownloadTask(task: ServerDownloadTask) {
     // 确保下载路径存在
     await ensureDir(fullDownloadPath);
 
-    // 下载每一集
-    const startEpisode = task.startEpisode || 1;
-    // 使用任务设置的总集数和API可下载的总集数中的较小值
-    const apiTotalEpisodes = videoDetail.episodes?.length || 0;
-    const configTotalEpisodes = task.totalEpisodes;
-    const totalEpisodes = Math.min(configTotalEpisodes, apiTotalEpisodes);
+    // 获取已下载的集数列表
+    const cachedEpisodes = await getCachedEpisodes(task.id);
 
-    // 检查起始集数是否超过总集数
-    if (startEpisode > configTotalEpisodes) {
-      logger.info(
-        `任务 ${task.title} 起始集数(${startEpisode})超过总集数(${configTotalEpisodes})，不执行任务`
-      );
-      // 更新任务为停止状态
-      task.enabled = false;
+    const downloadEpisodes = Array.from(
+      {
+        length: Math.min(
+          videoDetail.episodes?.length || 0,
+          videoDetail.episode_numbers?.length || 0
+        ),
+      },
+      (_, i) => {
+        // 使用episode_numbers[i]如果存在，否则使用默认的集数编号（i+1）
+        const episodeNumber = videoDetail.episode_numbers?.[i] || i + 1;
+        return { episodeNumber, url: videoDetail.episodes[i] };
+      }
+    ).filter(
+      (item) =>
+        item.episodeNumber >= task.startEpisode &&
+        item.episodeNumber <= task.totalEpisodes &&
+        !cachedEpisodes.includes(item.episodeNumber)
+    );
+
+    // 检查下载集数
+    if (downloadEpisodes.length === 0) {
+      logger.info(`任务 ${task.title} 没有需要下载的集数，不执行任务`);
+
+      task.nextRun = calculateNextRun(task.cronExpression);
+      // 更新任务集数
       task.updatedAt = Date.now();
       await saveServerDownloadTask(task);
       // 删除运行标记文件
@@ -543,33 +597,6 @@ export async function executeDownloadTask(task: ServerDownloadTask) {
       return;
     }
 
-    // 检查下载集数是否超过实际集数
-    if (startEpisode > totalEpisodes) {
-      logger.info(
-        `任务 ${task.title} 起始集数(${startEpisode})超过实际集数(${totalEpisodes})，不执行任务`
-      );
-      // 删除运行标记文件
-      try {
-        fs.unlinkSync(runningFlagPath);
-      } catch (err) {
-        // 忽略错误
-      }
-      return;
-    }
-
-    // 获取已下载的集数列表
-    const cachedEpisodes = await getCachedEpisodes(task.id);
-
-    // 创建子进程来执行下载任务
-    const taskData = {
-      task,
-      videoDetail,
-      startEpisode,
-      totalEpisodes,
-      cachedEpisodes,
-      fullDownloadPath,
-    };
-
     // 使用独立的下载执行器模块
     const executorPath = path.resolve(
       process.cwd(),
@@ -577,7 +604,13 @@ export async function executeDownloadTask(task: ServerDownloadTask) {
       'download-executor.mjs'
     );
 
-    const taskProcess = fork(executorPath, [JSON.stringify(taskData)]);
+    const taskProcess = fork(executorPath, [
+      JSON.stringify({
+        task,
+        downloadEpisodes,
+        fullDownloadPath,
+      }),
+    ]);
 
     // 存储进程引用
     runningTasks.set(task.id, taskProcess);
@@ -637,6 +670,9 @@ export async function executeDownloadTask(task: ServerDownloadTask) {
           // 更新任务集数
           if (!errorStop) {
             try {
+              if (typedMessage.data.episodeNumber >= task.totalEpisodes) {
+                task.nextRun = calculateNextRun(task.cronExpression);
+              }
               task.startEpisode = typedMessage.data.episodeNumber + 1;
               task.updatedAt = Date.now();
               await saveServerDownloadTask(task);

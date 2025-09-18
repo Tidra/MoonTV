@@ -44,7 +44,8 @@ RUN pnpm run build
 FROM node:20-alpine AS runner
 
 # 安装运行时依赖，包括ffmpeg和tzdata时区包
-RUN apk add --no-cache ffmpeg tzdata
+RUN apk add --no-cache ffmpeg ffmpeg-utils ffmpeg-dev \
+  && apk add --no-cache tzdata
 
 # 设置时区为中国上海
 ENV TZ=Asia/Shanghai
