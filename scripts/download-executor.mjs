@@ -219,24 +219,7 @@ async function downloadWithFFmpeg(url, filePath, downloadTimeout = 3600) {
             resolve(true);
           }
         } catch (error) {
-          if (isTimedOut) return; // 检查是否已超时
-
-          // 处理复制流失败的情况
-          if (error.message !== `下载超时: ${downloadTimeout}秒`) {
-            sendMessage('error', `ffmpeg操作失败: ${error.message}`);
-            // 如果ffmpeg命令失败，回退到HTTP下载
-            sendMessage('info', 'ffmpeg不可用，回退到HTTP下载...');
-
-            try {
-              const httpResult = await downloadWithHttp(url, filePath, downloadTimeout);
-              if (isTimedOut) return;
-              resolve(httpResult);
-            } catch (httpError) {
-              reject(httpError);
-            }
-          } else {
-            reject(error);
-          }
+          reject(error);
         }
       };
 

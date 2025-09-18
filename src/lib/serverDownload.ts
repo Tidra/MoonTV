@@ -684,6 +684,8 @@ export async function executeDownloadTask(task: ServerDownloadTask) {
           logger.error(`[任务 ${task.title}] 下载错误:`, typedMessage.data);
           errorStop = true;
         }
+      } else {
+        logger.debug(`[任务 ${task.title}] 未知消息类型:`, message);
       }
     });
 

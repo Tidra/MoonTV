@@ -755,14 +755,17 @@ function PlayPageClient() {
         const sourcesAllInfo = await fetchSourcesData(
           searchTitle || videoTitle
         );
-        const sourcesInitInfo = sourcesInfo.filter((result: SearchResult) =>
-          result.episode_numbers.indexOf(currentEpisodeNumber) >= 0
-            ? true
-            : false
-        );
-        if (sourcesInitInfo.length > 0) {
-          sourcesInfo = sourcesInitInfo;
-          newEpisodeIndex = 1;
+        if (currentEpisodeNumber) {
+          const sourcesInitInfo = sourcesAllInfo.filter(
+            (result: SearchResult) =>
+              result.episode_numbers.indexOf(currentEpisodeNumber) >= 0
+                ? true
+                : false
+          );
+          if (sourcesInitInfo.length > 0) {
+            sourcesInfo = sourcesInitInfo;
+            newEpisodeIndex = 1;
+          }
         } else {
           sourcesInfo = sourcesInfo ? sourcesInfo : sourcesAllInfo;
         }

@@ -42,7 +42,10 @@ export const logger: Logger = {
    * 调试日志输出
    */
   debug: (...args: unknown[]): void => {
-    if (process.env.NODE_ENV === 'development') {
+    if (
+      process.env.NODE_ENV === 'development' ||
+      process.env.LOG_LEVEL === 'debug'
+    ) {
       console.debug(formatLogMessage(...args));
     }
   },

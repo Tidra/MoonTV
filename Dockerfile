@@ -43,9 +43,10 @@ RUN pnpm run build
 # ---- 第 3 阶段：生成运行时镜像 ----
 FROM node:20-alpine AS runner
 
-# 安装运行时依赖，包括ffmpeg和tzdata时区包
-RUN apk add --no-cache ffmpeg ffmpeg-utils ffmpeg-dev \
-  && apk add --no-cache tzdata
+# 安装运行时依赖，先更新仓库，然后尝试安装开发包但有回退方案
+RUN apk update \
+  && apk add --no-cache ffmpeg tzdata \
+  && (apk add --no-cache ffmpeg-dev || echo "ffmpeg-dev 包不可用，跳过安装")
 
 # 设置时区为中国上海
 ENV TZ=Asia/Shanghai
