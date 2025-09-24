@@ -162,6 +162,12 @@ export interface SkipConfig {
 
 // 添加消息类型定义
 export interface ChildProcessMessage {
-  type: 'info' | 'error' | 'download_complete' | 'download_error';
+  type:
+    | 'info'
+    | 'error'
+    | 'warn'
+    | 'debug'
+    | 'download_complete'
+    | 'download_error';
   data: any;
 }

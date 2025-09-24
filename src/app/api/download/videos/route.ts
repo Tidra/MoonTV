@@ -67,11 +67,22 @@ export async function DELETE(request: NextRequest) {
     if (video) {
       // 删除视频文件
       try {
-        const baseDownloadPath = getBaseDownloadPath();
-        const fullPath = path.join(baseDownloadPath, video.episode_path);
-        if (fs.existsSync(fullPath)) {
-          fs.unlinkSync(fullPath);
-          logger.info(`已删除缓存视频文件: ${fullPath}`);
+        if (video.episode_path?.endsWith('.m3u8')) {
+          const baseDownloadPath = getBaseDownloadPath();
+          const fullPath = path.dirname(
+            path.join(baseDownloadPath, video.episode_path)
+          );
+          if (fs.existsSync(fullPath)) {
+            fs.rmSync(fullPath, { recursive: true, force: true });
+            logger.info(`已删除m3u8缓存视频文件目录: ${fullPath}`);
+          }
+        } else {
+          const baseDownloadPath = getBaseDownloadPath();
+          const fullPath = path.join(baseDownloadPath, video.episode_path);
+          if (fs.existsSync(fullPath)) {
+            fs.unlinkSync(fullPath);
+            logger.info(`已删除缓存视频文件: ${fullPath}`);
+          }
         }
       } catch (fileError) {
         logger.error('删除视频文件失败:', fileError);

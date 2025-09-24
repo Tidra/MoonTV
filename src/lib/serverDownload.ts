@@ -342,9 +342,12 @@ export async function getServerCachedVideosByTitle(
           poster: firstVideo.poster,
           episodes: sortedVideos.map(
             (video) =>
-              `/api/download/file?path=${encodeURIComponent(
-                video.episode_path
-              )}`
+              `/api/download/file/${video.episode_path
+                .split('/')
+                .map((segment) =>
+                  encodeURIComponent(segment).replace(/\+/g, '%20')
+                )
+                .join('/')}`
           ),
           episode_numbers: sortedVideos.map((video) => video.episode_number),
           source: 'server_cache',
@@ -391,7 +394,12 @@ export async function getServerCachedVideosById(
         poster: firstVideo.poster,
         episodes: sortedVideos.map(
           (video) =>
-            `/api/download/file?path=${encodeURIComponent(video.episode_path)}`
+            `/api/download/file/${video.episode_path
+              .split('/')
+              .map((segment) =>
+                encodeURIComponent(segment).replace(/\+/g, '%20')
+              )
+              .join('/')}`
         ),
         episode_numbers: sortedVideos.map((video) => video.episode_number),
         source: 'server_cache',
@@ -459,14 +467,14 @@ export function stopDownloadTask(taskId: string): boolean {
     try {
       subProcess.send('terminate');
 
-      // 2秒后检查进程是否仍在运行，如果是则使用SIGKILL强制终止
+      // 15秒后检查进程是否仍在运行，如果是则使用SIGKILL强制终止
       setTimeout(() => {
         if (!subProcess.killed) {
           subProcess.kill('SIGKILL');
         }
         runningTasks.delete(taskId);
         logger.info(`任务 ${taskId} 的下载进程已停止`);
-      }, 2000);
+      }, 15000);
 
       return true;
     } catch (error) {
@@ -615,7 +623,9 @@ export async function executeDownloadTask(task: ServerDownloadTask) {
     // 存储进程引用
     runningTasks.set(task.id, taskProcess);
 
-    logger.info(`任务 ${task.title} 已启动，PID: ${taskProcess.pid}`);
+    logger.info(
+      `任务 ${task.title}[${task.id}] 已启动，PID: ${taskProcess.pid}`
+    );
     let errorStop = false;
 
     // 修复类型错误：为message参数添加类型断言或类型守卫
@@ -632,6 +642,10 @@ export async function executeDownloadTask(task: ServerDownloadTask) {
           logger.info(`[任务 ${task.title}] 输出: ${typedMessage.data}`);
         } else if (typedMessage.type === 'error') {
           logger.error(`[任务 ${task.title}] 错误: ${typedMessage.data}`);
+        } else if (typedMessage.type === 'warn') {
+          logger.warn(`[任务 ${task.title}] 警告: ${typedMessage.data}`);
+        } else if (typedMessage.type === 'debug') {
+          logger.debug(`[任务 ${task.title}] 调试信息: ${typedMessage.data}`);
         } else if (typedMessage.type === 'download_complete') {
           logger.info(
             `[任务 ${task.title}] 第${typedMessage.data.episodeNumber}集下载完成，文件路径: ${typedMessage.data.filePath}`
@@ -643,10 +657,9 @@ export async function executeDownloadTask(task: ServerDownloadTask) {
               unique_id: `video_${task.id}_${typedMessage.data.episodeNumber}`,
               title: task.title,
               poster: videoDetail.poster || '',
-              episode_path: path.relative(
-                baseDownloadPath,
-                typedMessage.data.filePath
-              ),
+              episode_path: path
+                .relative(baseDownloadPath, typedMessage.data.filePath)
+                .replace(/\\/g, '/'),
               episode_number: typedMessage.data.episodeNumber,
               source: 'server_cache',
               source_name: '服务器缓存',
@@ -687,6 +700,10 @@ export async function executeDownloadTask(task: ServerDownloadTask) {
       } else {
         logger.debug(`[任务 ${task.title}] 未知消息类型:`, message);
       }
+    });
+
+    taskProcess.on('data', (data) => {
+      logger.debug(`[任务 ${task.title}] data输出: ${data}`);
     });
 
     taskProcess.on('close', (code) => {
