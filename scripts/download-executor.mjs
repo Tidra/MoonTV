@@ -1,9 +1,9 @@
 /* eslint-disable no-console */
+import { rejects } from 'assert';
 import { spawn } from 'child_process';
 import fs from 'fs';
 import http from 'http';
 import https from 'https';
-import pLimit from 'p-limit';
 import path from 'path';
 import { URL } from 'url';
 
@@ -93,7 +93,7 @@ function killCurrentProcess() {
  * @returns {Promise<boolean>} - 下载是否成功
  */
 async function downloadWithHttp(url, filePath, downloadTimeout = 3600, logLevel = 'normal') {
-  return new Promise((resolve, _reject) => {
+  return new Promise((resolve, reject) => {
     if (logLevel !== 'quiet') {
       sendMessage('debug', `建立HTTP连接到: ${url}`);
     }
@@ -165,7 +165,7 @@ async function downloadWithHttp(url, filePath, downloadTimeout = 3600, logLevel 
       sendMessage('error', `HTTP请求失败: ${err.message} ${url}`);
       fileStream.close();
       await deleteFileIfExists(filePath);
-      resolve(false);
+      reject(err);
     });
 
     request.setTimeout(downloadTimeout * 1000, () => {
@@ -361,6 +361,9 @@ async function getM3u8Url(url, m3u8Dir) {
 async function retry(operation, { retries = 3, delay = 1000 }) {
   let attempts = 0;
   while (attempts <= retries) {
+    if (isStop) {
+      throw new Error('下载已停止');
+    }
     try {
       return await operation();
     } catch (error) {
@@ -373,6 +376,41 @@ async function retry(operation, { retries = 3, delay = 1000 }) {
     }
   }
   throw new Error('重试次数超过最大重试次数');
+}
+
+/**
+ * 创建一个限制并发数量的函数
+ * @param {number} concurrency - 并发数量
+ * @returns {Function} - 限制并发的函数
+ */
+function createLimit(concurrency) {
+  const queue = [];
+  let active = 0;
+
+  function next() {
+    if (active < concurrency && queue.length > 0) {
+      const { fn, resolve, reject } = queue.shift();
+      active++;
+
+      Promise.resolve()
+        .then(() => fn())
+        .then(
+          (value) => resolve(value),
+          (error) => reject(error)
+        )
+        .finally(() => {
+          active--;
+          next();
+        });
+    }
+  }
+
+  return function limit(fn) {
+    return new Promise((resolve, reject) => {
+      queue.push({ fn, resolve, reject });
+      next();
+    });
+  };
 }
 
 /**
@@ -420,7 +458,7 @@ async function downloadM3u8(url, directoryPath, downloadFileName, downloadTimeou
     }
 
     // 使用p-limit控制并发下载
-    const limit = pLimit(concurrency);
+    const limit = createLimit(concurrency);
     sendMessage('info', `开始下载 ${m3u8Urls.length} 个TS片段，并发数: ${concurrency}`);
 
     // 准备文件路径数组，保持与m3u8Urls相同的顺序
@@ -443,6 +481,7 @@ async function downloadM3u8(url, directoryPath, downloadFileName, downloadTimeou
             processTime = currentTime;
             sendMessage('debug', `正在下载第 ${index + 1}/${m3u8Urls.length} 个TS片段`);
           }
+          sendMessage('debug', `正在下载第 ${index + 1}/${m3u8Urls.length} 个TS片段`);
           if (fs.existsSync(filePath)) {
             return true;
           }
