@@ -481,7 +481,6 @@ async function downloadM3u8(url, directoryPath, downloadFileName, downloadTimeou
             processTime = currentTime;
             sendMessage('debug', `正在下载第 ${index + 1}/${m3u8Urls.length} 个TS片段`);
           }
-          sendMessage('debug', `正在下载第 ${index + 1}/${m3u8Urls.length} 个TS片段`);
           if (fs.existsSync(filePath)) {
             return true;
           }
