@@ -5,6 +5,7 @@
 'use client';
 
 import {
+  Check,
   Clock,
   HardDrive,
   Loader2,
@@ -31,6 +32,10 @@ export default function ServerCachePage() {
   const [activeTab, setActiveTab] = useState<'tasks' | 'videos'>('tasks');
   const [downloadingTaskIds, setDownloadingTaskIds] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+
+  // 添加批量选择状态
+  const [selectedVideos, setSelectedVideos] = useState<string[]>([]);
+  const [isBatchMode, setIsBatchMode] = useState(false);
 
   // 定时下载弹窗状态
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
@@ -171,6 +176,78 @@ export default function ServerCachePage() {
     });
   };
 
+  // 处理单个视频选择
+  const handleVideoSelect = (uniqueId: string) => {
+    setSelectedVideos((prevSelected) =>
+      prevSelected.includes(uniqueId)
+        ? prevSelected.filter((id) => id !== uniqueId)
+        : [...prevSelected, uniqueId]
+    );
+  };
+
+  // 切换批量模式
+  const toggleBatchMode = () => {
+    setIsBatchMode(!isBatchMode);
+    setSelectedVideos([]); // 切换模式时清空选择
+  };
+
+  // 全选/取消全选
+  const toggleSelectAll = () => {
+    if (selectedVideos.length === serverVideos.length) {
+      setSelectedVideos([]);
+    } else {
+      setSelectedVideos(serverVideos.map((video) => video.unique_id));
+    }
+  };
+
+  // 批量删除视频
+  const handleBatchDelete = async () => {
+    if (selectedVideos.length === 0) return;
+
+    setConfirmDialog({
+      isOpen: true,
+      message: `确定要删除选中的 ${selectedVideos.length} 个缓存视频吗？`,
+      onConfirm: async () => {
+        try {
+          const response = await fetch(
+            `/api/download/videos?uniqueIds=${encodeURIComponent(
+              JSON.stringify(selectedVideos)
+            )}`,
+            {
+              method: 'DELETE',
+            }
+          );
+          const result = await response.json();
+
+          if (result.success) {
+            setServerVideos(
+              serverVideos.filter(
+                (video) => !selectedVideos.includes(video.unique_id)
+              )
+            );
+            setSelectedVideos([]);
+            setNotification({
+              message: `成功删除 ${
+                result.deletedCount || selectedVideos.length
+              } 个缓存视频！`,
+              type: 'success',
+            });
+          } else {
+            throw new Error(result.error || '批量删除失败');
+          }
+        } catch (error) {
+          console.error('批量删除缓存视频失败:', error);
+          setNotification({
+            message: '批量删除缓存视频失败，请重试',
+            type: 'error',
+          });
+        } finally {
+          setConfirmDialog(null);
+        }
+      },
+    });
+  };
+
   // 删除缓存视频
   const handleDeleteVideo = async (uniqueId: string) => {
     setConfirmDialog({
@@ -179,7 +256,9 @@ export default function ServerCachePage() {
       onConfirm: async () => {
         try {
           const response = await fetch(
-            `/api/download/videos?uniqueId=${uniqueId}`,
+            `/api/download/videos?uniqueIds=${encodeURIComponent(
+              JSON.stringify([uniqueId])
+            )}`,
             {
               method: 'DELETE',
             }
@@ -500,7 +579,44 @@ export default function ServerCachePage() {
                 <h2 className='text-lg font-semibold text-gray-900 dark:text-white'>
                   已缓存视频
                 </h2>
+                {serverVideos.length > 0 && (
+                  <div className='flex items-center space-x-2'>
+                    <button
+                      onClick={toggleBatchMode}
+                      className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                        isBatchMode
+                          ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400'
+                          : 'bg-gray-100 text-gray-800 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
+                      }`}
+                    >
+                      {isBatchMode ? '退出批量选择' : '批量选择'}
+                    </button>
+                    {isBatchMode && selectedVideos.length > 0 && (
+                      <button
+                        onClick={handleBatchDelete}
+                        className='px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-md transition-colors flex items-center'
+                      >
+                        <Trash2 className='w-4 h-4 mr-1' />
+                        删除所选
+                        <span className='ml-1 bg-white/20 text-white text-xs px-1.5 py-0.5 rounded-full'>
+                          {selectedVideos.length}
+                        </span>
+                      </button>
+                    )}
+                    {isBatchMode && (
+                      <button
+                        onClick={toggleSelectAll}
+                        className='px-3 py-1.5 text-sm font-medium rounded-md bg-gray-100 text-gray-800 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600 transition-colors'
+                      >
+                        {selectedVideos.length === serverVideos.length
+                          ? '取消全选'
+                          : '全选'}
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
+
               {serverVideos.length === 0 ? (
                 <div className='px-6 py-12 text-center'>
                   <HardDrive className='w-12 h-12 mx-auto text-gray-400 dark:text-gray-500' />
@@ -516,8 +632,30 @@ export default function ServerCachePage() {
                   {serverVideos.map((video) => (
                     <div
                       key={`${video.id}-${video.episode_number}`}
-                      className='group relative bg-gray-100 dark:bg-gray-750 rounded-lg overflow-hidden aspect-[2/3] hover:shadow-lg transition-shadow'
+                      className={`group relative bg-gray-100 dark:bg-gray-750 rounded-lg overflow-hidden aspect-[2/3] hover:shadow-lg transition-shadow ${
+                        isBatchMode ? 'cursor-pointer' : ''
+                      }`}
+                      onClick={
+                        isBatchMode
+                          ? () => handleVideoSelect(video.unique_id)
+                          : undefined
+                      }
                     >
+                      {/* 批量选择模式下显示选择框 */}
+                      {isBatchMode && (
+                        <div
+                          className={`absolute top-2 left-2 p-1.5 bg-black/50 dark:bg-gray-900/50 rounded-full z-10 ${
+                            selectedVideos.includes(video.unique_id)
+                              ? 'bg-blue-600'
+                              : ''
+                          }`}
+                        >
+                          {selectedVideos.includes(video.unique_id) && (
+                            <Check className='w-3 h-3 text-white' />
+                          )}
+                        </div>
+                      )}
+
                       {/* 视频海报图片 */}
                       {video.poster ? (
                         <div className='absolute inset-0'>
@@ -548,32 +686,41 @@ export default function ServerCachePage() {
                         <div className='absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent'></div>
                       )}
 
-                      <div className='absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity'>
-                        <Link
-                          href={`/play?source=server_cache&id=${
-                            video.id
-                          }&episode=${
-                            video.episode_number
-                          }&title=${encodeURIComponent(video.title)}&year=${
-                            video.year || ''
-                          }&stitle=${encodeURIComponent(video.title)}&stype=${
-                            video.type_name === '电影' ? 'movie' : 'tv'
-                          }`}
-                          className='p-2 bg-white/90 dark:bg-gray-700/90 rounded-full text-gray-900 dark:text-white hover:bg-white dark:hover:bg-gray-600 transition-colors'
-                          title='播放视频'
-                        >
-                          <Play className='w-6 h-6' />
-                        </Link>
-                      </div>
-                      <div className='absolute top-2 right-2'>
-                        <button
-                          onClick={() => handleDeleteVideo(video.unique_id)}
-                          className='p-1.5 bg-black/50 dark:bg-gray-900/50 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600'
-                          title='删除缓存'
-                        >
-                          <Trash2 className='w-3 h-3' />
-                        </button>
-                      </div>
+                      {/* 播放按钮在批量模式下隐藏 */}
+                      {!isBatchMode && (
+                        <div className='absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity'>
+                          <Link
+                            href={`/play?source=server_cache&id=${
+                              video.id
+                            }&episode=${
+                              video.episode_number
+                            }&title=${encodeURIComponent(video.title)}&year=${
+                              video.year || ''
+                            }&stitle=${encodeURIComponent(video.title)}&stype=${
+                              video.type_name === '电影' ? 'movie' : 'tv'
+                            }`}
+                            className='p-2 bg-white/90 dark:bg-gray-700/90 rounded-full text-gray-900 dark:text-white hover:bg-white dark:hover:bg-gray-600 transition-colors'
+                            title='播放视频'
+                          >
+                            <Play className='w-6 h-6' />
+                          </Link>
+                        </div>
+                      )}
+
+                      {/* 删除按钮在批量模式下隐藏 */}
+                      {!isBatchMode && (
+                        <div className='absolute top-2 right-2'>
+                          <button
+                            onClick={() => handleDeleteVideo(video.unique_id)}
+                            className='p-1.5 bg-black/50 dark:bg-gray-900/50 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600'
+                            title='删除缓存'
+                          >
+                            <Trash2 className='w-3 h-3' />
+                          </button>
+                        </div>
+                      )}
+
+                      {/* 视频标题和集数信息 */}
                       <div className='absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-2'>
                         <h3
                           className='text-xs font-medium text-white truncate'

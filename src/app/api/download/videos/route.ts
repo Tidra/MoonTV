@@ -47,51 +47,68 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// DELETE /api/download/videos - 删除指定视频
+// DELETE /api/download/videos - 删除视频
 export async function DELETE(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const uniqueId = searchParams.get('uniqueId');
+    const uniqueIdsStr = searchParams.get('uniqueIds');
 
-    if (!uniqueId) {
-      return NextResponse.json(
-        { success: false, error: '缺少视频ID' },
-        { status: 400 }
-      );
-    }
-
-    // 获取视频信息以删除对应的文件
-    const videos = await getAllServerCachedVideos();
-    const video = videos.find((v) => v.unique_id === uniqueId);
-
-    if (video) {
-      // 删除视频文件
+    if (uniqueIdsStr) {
       try {
-        if (video.episode_path?.endsWith('.m3u8')) {
-          const baseDownloadPath = getBaseDownloadPath();
-          const fullPath = path.dirname(
-            path.join(baseDownloadPath, video.episode_path)
-          );
-          if (fs.existsSync(fullPath)) {
-            fs.rmSync(fullPath, { recursive: true, force: true });
-            logger.info(`已删除m3u8缓存视频文件目录: ${fullPath}`);
+        const uniqueIds = JSON.parse(uniqueIdsStr) as string[];
+        const videos = await getAllServerCachedVideos();
+        for (const uniqueId of uniqueIds) {
+          const video = videos.find((v) => v.unique_id === uniqueId);
+
+          if (video) {
+            // 删除视频文件
+            try {
+              if (video.episode_path?.endsWith('.m3u8')) {
+                const baseDownloadPath = getBaseDownloadPath();
+                const fullPath = path.dirname(
+                  path.join(baseDownloadPath, video.episode_path)
+                );
+                if (fs.existsSync(fullPath)) {
+                  fs.rmSync(fullPath, { recursive: true, force: true });
+                  logger.info(`已删除m3u8缓存视频文件目录: ${fullPath}`);
+                }
+              } else {
+                const baseDownloadPath = getBaseDownloadPath();
+                const fullPath = path.join(
+                  baseDownloadPath,
+                  video.episode_path
+                );
+                if (fs.existsSync(fullPath)) {
+                  fs.unlinkSync(fullPath);
+                  logger.info(`已删除缓存视频文件: ${fullPath}`);
+                }
+              }
+            } catch (fileError) {
+              logger.error('删除视频文件失败:', fileError);
+            }
           }
-        } else {
-          const baseDownloadPath = getBaseDownloadPath();
-          const fullPath = path.join(baseDownloadPath, video.episode_path);
-          if (fs.existsSync(fullPath)) {
-            fs.unlinkSync(fullPath);
-            logger.info(`已删除缓存视频文件: ${fullPath}`);
-          }
+
+          await deleteServerCachedVideo(uniqueId);
         }
-      } catch (fileError) {
-        logger.error('删除视频文件失败:', fileError);
+
+        return NextResponse.json({
+          success: true,
+          message: `成功删除${uniqueIds.length}个视频`,
+          deletedCount: uniqueIds.length,
+        });
+      } catch (error) {
+        logger.error('删除视频失败:', error);
+        return NextResponse.json(
+          { success: false, error: '删除视频失败' },
+          { status: 500 }
+        );
       }
     }
-
-    await deleteServerCachedVideo(uniqueId);
-
-    return NextResponse.json({ success: true, message: '视频删除成功' });
+    // 如果没有提供ID参数
+    return NextResponse.json(
+      { success: false, error: '缺少视频ID' },
+      { status: 400 }
+    );
   } catch (error) {
     logger.error('删除视频失败:', error);
     return NextResponse.json(

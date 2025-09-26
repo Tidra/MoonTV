@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { ChildProcess, fork } from 'child_process';
+import parser from 'cron-parser';
 import fs from 'fs';
 import path from 'path';
 import { promisify } from 'util';
@@ -206,92 +207,16 @@ export function calculateNextRun(
   currentTime?: number
 ): number | undefined {
   try {
-    // 支持 cron 表达式格式: "分钟 小时 日 月 周"
-    // 例如: "0 2 * * *" - 每天凌晨2点
-    //       "*/5 * * * *" - 每5分钟
-    //       "0 */2 * * *" - 每2小时
-    const parts = cronExpression.trim().split(' ');
-    if (parts.length !== 5) {
-      logger.warn(
-        `无效的 cron 表达式格式: ${cronExpression}，使用默认24小时间隔`
-      );
-      return currentTime ? currentTime + 24 * 60 * 60 * 1000 : undefined;
-    }
+    // 使用 cron-parser 库解析表达式
+    const options = {
+      currentDate: currentTime ? new Date(currentTime) : new Date(),
+      tz: process.env.TZ || 'Asia/Shanghai',
+    };
 
-    const [minutePart, hourPart, _dayPart, _monthPart, _weekPart] = parts;
-    const currentDate = new Date(currentTime || Date.now());
+    const interval = parser.parse(cronExpression, options);
+    const nextRun = interval.next().toDate();
 
-    // 解析分钟部分
-    let nextMinutes = currentDate.getMinutes();
-    if (minutePart !== '*') {
-      if (minutePart.includes('*/')) {
-        const step = parseInt(minutePart.substring(2));
-        nextMinutes = Math.floor(nextMinutes / step) * step + step;
-        if (nextMinutes >= 60) {
-          nextMinutes = 0;
-          currentDate.setHours(currentDate.getHours() + 1);
-        }
-      } else {
-        const minutes = parseInt(minutePart);
-        if (minutes > currentDate.getMinutes()) {
-          nextMinutes = minutes;
-        } else {
-          nextMinutes = minutes;
-          currentDate.setHours(currentDate.getHours() + 1);
-        }
-      }
-    } else {
-      nextMinutes++;
-      if (nextMinutes >= 60) {
-        nextMinutes = 0;
-        currentDate.setHours(currentDate.getHours() + 1);
-      }
-    }
-
-    // 解析小时部分
-    let nextHours = currentDate.getHours();
-    if (hourPart !== '*') {
-      if (hourPart.includes('*/')) {
-        const step = parseInt(hourPart.substring(2));
-        nextHours = Math.floor(nextHours / step) * step + step;
-        if (nextHours >= 24) {
-          nextHours = 0;
-          currentDate.setDate(currentDate.getDate() + 1);
-        }
-      } else {
-        const hours = parseInt(hourPart);
-        if (
-          hours > nextHours ||
-          (hours === nextHours && nextMinutes > currentDate.getMinutes())
-        ) {
-          nextHours = hours;
-        } else {
-          nextHours = hours;
-          currentDate.setDate(currentDate.getDate() + 1);
-        }
-      }
-    }
-
-    currentDate.setMinutes(nextMinutes);
-    currentDate.setHours(nextHours);
-    currentDate.setSeconds(0);
-    currentDate.setMilliseconds(0);
-
-    // 如果计算的时间已经过去了，增加到下一个周期
-    if (currentDate.getTime() <= (currentTime || Date.now())) {
-      if (minutePart === '*' && hourPart === '*') {
-        // 每分钟执行，加1分钟
-        currentDate.setTime(currentDate.getTime() + 60 * 1000);
-      } else if (hourPart === '*') {
-        // 每小时执行，加1小时
-        currentDate.setTime(currentDate.getTime() + 60 * 60 * 1000);
-      } else {
-        // 每天、每周、每月等，加1天
-        currentDate.setDate(currentDate.getDate() + 1);
-      }
-    }
-
-    return currentDate.getTime();
+    return nextRun.getTime();
   } catch (error) {
     logger.error(`解析 cron 表达式时出错: ${cronExpression}`, error);
     // 出错时使用默认24小时间隔
@@ -626,7 +551,7 @@ export async function executeDownloadTask(task: ServerDownloadTask) {
     logger.info(
       `任务 ${task.title}[${task.id}] 已启动，PID: ${taskProcess.pid}`
     );
-    let errorStop = false;
+    let errorStopEpisodeNumber = -1;
 
     // 修复类型错误：为message参数添加类型断言或类型守卫
     taskProcess.on('message', async (message: unknown) => {
@@ -679,23 +604,9 @@ export async function executeDownloadTask(task: ServerDownloadTask) {
               err
             );
           }
-
-          // 更新任务集数
-          if (!errorStop) {
-            try {
-              if (typedMessage.data.episodeNumber >= task.totalEpisodes) {
-                task.nextRun = calculateNextRun(task.cronExpression);
-              }
-              task.startEpisode = typedMessage.data.episodeNumber + 1;
-              task.updatedAt = Date.now();
-              await saveServerDownloadTask(task);
-            } catch (err) {
-              logger.error(`[任务 ${task.title}] 更新任务集数记录失败:`, err);
-            }
-          }
         } else if (typedMessage.type === 'download_error') {
           logger.error(`[任务 ${task.title}] 下载错误:`, typedMessage.data);
-          errorStop = true;
+          errorStopEpisodeNumber = typedMessage.data.episodeNumber;
         }
       } else {
         logger.debug(`[任务 ${task.title}] 未知消息类型:`, message);
@@ -706,8 +617,27 @@ export async function executeDownloadTask(task: ServerDownloadTask) {
       logger.debug(`[任务 ${task.title}] data输出: ${data}`);
     });
 
-    taskProcess.on('close', (code) => {
+    taskProcess.on('close', async (code) => {
       logger.info(`[任务 ${task.title}] 已完成，退出码: ${code}`);
+      if (errorStopEpisodeNumber > 0) {
+        task.nextRun = calculateNextRun(task.cronExpression);
+        task.updatedAt = Date.now();
+        // 更新任务集数
+        task.startEpisode = errorStopEpisodeNumber;
+        await saveServerDownloadTask(task);
+      } else if (code === 0) {
+        task.nextRun = calculateNextRun(task.cronExpression);
+        task.updatedAt = Date.now();
+        // 更新任务集数
+        task.startEpisode = Math.min(
+          Math.max(
+            ...(videoDetail.episode_numbers ?? []),
+            videoDetail.episodes.length
+          ),
+          task.totalEpisodes || Number.MAX_SAFE_INTEGER
+        );
+        await saveServerDownloadTask(task);
+      }
       runningTasks.delete(task.id);
       // 删除运行标记文件
       try {
